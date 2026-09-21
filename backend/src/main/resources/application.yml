@@ -1,0 +1,32 @@
+spring:
+  application:
+    name: web-editor-backend
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/web_editor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:web_editor}
+    password: ${DB_PASSWORD:web_editor}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+editor:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  storage:
+    minio:
+      endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket: ${MINIO_BUCKET:web-editor}
+      initialize-bucket: ${MINIO_INITIALIZE_BUCKET:true}
+    orphan-cleanup:
+      cron: ${ORPHAN_CLEANUP_CRON:0 30 3 * * *}
+      grace-period: ${ORPHAN_CLEANUP_GRACE_PERIOD:24h}
+
+server:
+  error:
+    include-message: never
+    include-stacktrace: never

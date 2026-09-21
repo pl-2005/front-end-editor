@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:web_editor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+editor:
+  cors:
+    allowed-origins: http://localhost:5173
+  storage:
+    minio:
+      endpoint: http://localhost:9000
+      access-key: test-access-key
+      secret-key: test-secret-key
+      bucket: web-editor-test
+      initialize-bucket: false
