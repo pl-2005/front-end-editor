@@ -1,12 +1,23 @@
 import type { ProjectFiles } from '../types/project'
 
 export const DEFAULT_FILES: ProjectFiles = {
-  '/index.html': { code: `<main class="card">
-  <p class="eyebrow">SANDBOX READY</p>
-  <h1>开始创作你的页面</h1>
-  <p>修改左侧文件，预览会即时更新。</p>
-  <button id="action">试一试</button>
-</main>` },
+  '/index.html': { code: `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Editor</title>
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">SANDBOX READY</p>
+    <h1>开始创作你的页面</h1>
+    <p>修改左侧文件，预览会即时更新。</p>
+    <button id="action">试一试</button>
+  </main>
+  <script type="module" src="/index.js"></script>
+</body>
+</html>` },
   '/styles.css': { code: `* { box-sizing: border-box; }
 body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; color: #eef2e9; background: #121510; }
 .card { width: min(560px, 90vw); padding: 48px; border: 1px solid #3a4135; border-radius: 24px; }

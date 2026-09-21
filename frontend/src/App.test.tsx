@@ -20,7 +20,7 @@ vi.mock('@codesandbox/sandpack-react', async () => {
   }
 
   return {
-    SandpackProvider: ({ files, customSetup, children }: { files: Record<string, { code: string }>; customSetup: object; children: ReactNode }) => {
+    SandpackProvider: ({ files, customSetup, template, options, children }: { files: Record<string, { code: string }>; customSetup: object; template: string; options: { autorun?: boolean }; children: ReactNode }) => {
       const [currentFiles, setFiles] = React.useState(files)
       const [activeFile, setActiveFile] = React.useState(Object.keys(files)[0])
       const mounted = React.useRef(false)
@@ -28,7 +28,9 @@ vi.mock('@codesandbox/sandpack-react', async () => {
         if (mounted.current) setActiveFile(Object.keys(files)[0])
         else mounted.current = true
       }, [customSetup, files])
-      return <Context.Provider value={{ files: currentFiles, setFiles, activeFile, setActiveFile }}>{children}</Context.Provider>
+      return <Context.Provider value={{ files: currentFiles, setFiles, activeFile, setActiveFile }}>
+        <div data-testid="sandpack-provider" data-template={template} data-autorun={String(options.autorun)}>{children}</div>
+      </Context.Provider>
     },
     useSandpack: () => {
       const runtime = useRuntime()
@@ -49,7 +51,7 @@ vi.mock('@codesandbox/sandpack-react', async () => {
     },
     SandpackLayout: ({ children }: { children: ReactNode }) => <div>{children}</div>,
     SandpackPreview: () => <div>预览</div>,
-    SandpackConsole: () => <div>控制台输出</div>,
+    SandpackConsole: ({ standalone }: { standalone?: boolean }) => <div data-testid="sandpack-console" data-standalone={String(Boolean(standalone))}>控制台输出</div>,
   }
 })
 
@@ -85,6 +87,23 @@ describe('App project coordination', () => {
     vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('uses the Vite runtime with automatic startup', async () => {
+    const first = project(1, '项目 A', 0)
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('?size=100')) return Promise.resolve(envelope({ items: [first], page: 0, size: 100, totalElements: 1, totalPages: 1 }))
+      if (url === '/api/projects/1') return Promise.resolve(envelope(first))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    render(<App />)
+
+    const provider = await screen.findByTestId('sandpack-provider')
+    expect(provider.getAttribute('data-template')).toBe('vite')
+    expect(provider.getAttribute('data-autorun')).toBe('true')
+    expect(screen.getByTestId('sandpack-console').getAttribute('data-standalone')).toBe('false')
   })
 
   it('does not apply a previous project save result to the currently open project', async () => {
@@ -152,6 +171,35 @@ describe('App project coordination', () => {
     expect(screen.getByRole('button', { name: '编辑当前文件 /styles.css' })).toBeTruthy()
   })
 
+  it('closes, opens, and resizes the console', async () => {
+    const first = project(1, '项目 A', 0)
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('?size=100')) return Promise.resolve(envelope({ items: [first], page: 0, size: 100, totalElements: 1, totalPages: 1 }))
+      if (url === '/api/projects/1') return Promise.resolve(envelope(first))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    const { container } = render(<App />)
+    await screen.findByText('项目 A', { selector: '.app-header strong' })
+
+    const workspace = container.querySelector<HTMLElement>('.workspace')
+    expect(workspace?.style.getPropertyValue('--console-height')).toBe('190px')
+
+    fireEvent.pointerDown(screen.getByRole('separator', { name: '调整控制台高度' }), { button: 0, clientY: 500 })
+    fireEvent.pointerMove(window, { clientY: 450 })
+    fireEvent.pointerUp(window)
+    expect(workspace?.style.getPropertyValue('--console-height')).toBe('240px')
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭控制台' }))
+    expect(screen.queryByText('控制台输出')).toBeNull()
+    expect(workspace?.style.getPropertyValue('--console-height')).toBe('34px')
+
+    fireEvent.click(screen.getByRole('button', { name: '打开控制台' }))
+    expect(screen.getByText('控制台输出')).toBeTruthy()
+    expect(workspace?.style.getPropertyValue('--console-height')).toBe('240px')
+  })
+
   it('keeps the last selected project when an earlier load finishes later', async () => {
     const first = project(1, '项目 A', 0)
     const second = project(2, '项目 B', 3)
@@ -209,7 +257,8 @@ describe('App project coordination', () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => {
       if (String(url) !== '/api/projects/1/snapshot' || init?.method !== 'PUT') return false
-      return JSON.parse(String(init.body)).files['/index.html'].code === '<h1>本地草稿</h1>'
+      const html = JSON.parse(String(init.body)).files['/index.html'].code as string
+      return html.includes('<meta charset="UTF-8">') && html.includes('<h1>本地草稿</h1>')
     })).toBe(true))
   })
 

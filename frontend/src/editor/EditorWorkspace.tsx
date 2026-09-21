@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   SandpackCodeEditor, SandpackConsole, SandpackLayout, SandpackPreview, SandpackProvider, useSandpack,
   type SandpackFiles,
@@ -7,6 +7,7 @@ import { useProjectSave } from '../hooks/useProjectSave'
 import type { ProjectDetails, ProjectFiles } from '../types/project'
 import { ProjectFileTree } from './ProjectFileTree'
 import { RevisionHistory } from './RevisionHistory'
+import { prepareSandpackFiles } from './sandpackRuntime'
 
 interface Props {
   project: ProjectDetails
@@ -19,12 +20,21 @@ interface Props {
   onSaveCopy: (name: string, entry: string, files: ProjectFiles) => Promise<void>
 }
 
+const DEFAULT_CONSOLE_HEIGHT = 190
+const MIN_CONSOLE_HEIGHT = 100
+const MIN_EDITOR_HEIGHT = 120
+
 function toProjectFiles(files: SandpackFiles): ProjectFiles {
   return Object.fromEntries(Object.entries(files).map(([path, file]) => [path, { code: typeof file === 'string' ? file : file.code }]))
 }
 
 function WorkspaceContents({ project, recoveryMessage, recoveredDraft, onVersionChange, onReload, onSaveCopy }: Omit<Props, 'files' | 'providerKey'>) {
   const { sandpack } = useSandpack()
+  const workspaceRef = useRef<HTMLElement>(null)
+  const resizeStartRef = useRef<{ pointerY: number; height: number } | null>(null)
+  const [consoleHeight, setConsoleHeight] = useState(DEFAULT_CONSOLE_HEIGHT)
+  const [isConsoleOpen, setIsConsoleOpen] = useState(true)
+  const [isResizingConsole, setIsResizingConsole] = useState(false)
   const files = useMemo(() => toProjectFiles(sandpack.files), [sandpack.files])
   const { status, message, save } = useProjectSave({ projectId: project.id, initialVersion: project.version, entry: project.entry, files, onVersionChange, initiallyDirty: recoveredDraft })
 
@@ -56,7 +66,43 @@ function WorkspaceContents({ project, recoveryMessage, recoveredDraft, onVersion
     if (name) await onSaveCopy(name, project.entry, toProjectFiles(sandpack.files))
   }, [onSaveCopy, project.entry, project.name, sandpack.files])
 
-  return <section className="workspace">
+  useEffect(() => {
+    if (!isResizingConsole) return
+
+    const resize = (event: PointerEvent) => {
+      const start = resizeStartRef.current
+      if (!start) return
+      const workspaceHeight = workspaceRef.current?.getBoundingClientRect().height || window.innerHeight
+      const maximumHeight = Math.max(MIN_CONSOLE_HEIGHT, workspaceHeight - 46 - MIN_EDITOR_HEIGHT)
+      setConsoleHeight(Math.min(maximumHeight, Math.max(MIN_CONSOLE_HEIGHT, start.height + start.pointerY - event.clientY)))
+    }
+    const stopResizing = () => {
+      resizeStartRef.current = null
+      setIsResizingConsole(false)
+    }
+
+    window.addEventListener('pointermove', resize)
+    window.addEventListener('pointerup', stopResizing)
+    window.addEventListener('pointercancel', stopResizing)
+    return () => {
+      window.removeEventListener('pointermove', resize)
+      window.removeEventListener('pointerup', stopResizing)
+      window.removeEventListener('pointercancel', stopResizing)
+    }
+  }, [isResizingConsole])
+
+  const startConsoleResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    resizeStartRef.current = { pointerY: event.clientY, height: consoleHeight }
+    setIsResizingConsole(true)
+  }, [consoleHeight])
+
+  const workspaceStyle = {
+    '--console-height': isConsoleOpen ? `${consoleHeight}px` : '34px',
+  } as CSSProperties
+
+  return <section ref={workspaceRef} className={`workspace${isResizingConsole ? ' resizing-console' : ''}`} style={workspaceStyle}>
     <header className="editor-toolbar">
       <div><span className={`status-dot ${status}`} /><span>{message}</span>{recoveryMessage ? <span className="recovery-note">{recoveryMessage}</span> : null}</div>
       <div className="toolbar-actions">
@@ -73,19 +119,29 @@ function WorkspaceContents({ project, recoveryMessage, recoveredDraft, onVersion
         <SandpackPreview showOpenInCodeSandbox={false} showRefreshButton />
       </SandpackLayout>
     </div>
-    <div className="console-panel"><div className="panel-heading"><span>控制台</span></div><SandpackConsole standalone resetOnPreviewRestart /></div>
+    <div className={`console-panel${isConsoleOpen ? '' : ' collapsed'}`}>
+      {isConsoleOpen ? <div className="console-resize-handle" role="separator" aria-label="调整控制台高度" aria-orientation="horizontal" onPointerDown={startConsoleResize} /> : null}
+      <div className="panel-heading">
+        <span>控制台</span>
+        <button type="button" aria-label={isConsoleOpen ? '关闭控制台' : '打开控制台'} title={isConsoleOpen ? '关闭控制台' : '打开控制台'} onClick={() => setIsConsoleOpen((open) => !open)}>
+          {isConsoleOpen ? '×' : '⌃'}
+        </button>
+      </div>
+      {isConsoleOpen ? <SandpackConsole resetOnPreviewRestart /> : null}
+    </div>
   </section>
 }
 
 export function EditorWorkspace({ project, files, providerKey, recoveryMessage, recoveredDraft, onVersionChange, onReload, onSaveCopy }: Props) {
   const customSetup = useMemo(() => ({ entry: project.entry }), [project.entry])
+  const runtimeFiles = useMemo(() => prepareSandpackFiles(files), [files])
 
   return <SandpackProvider
     key={providerKey}
-    template="vanilla"
-    files={files}
+    template="vite"
+    files={runtimeFiles}
     customSetup={customSetup}
-    options={{ activeFile: project.entry, visibleFiles: Object.keys(files), recompileMode: 'delayed', recompileDelay: 300 }}
+    options={{ activeFile: project.entry, visibleFiles: Object.keys(files), autorun: true, recompileMode: 'delayed', recompileDelay: 300 }}
     theme="dark"
   >
     <WorkspaceContents project={project} recoveryMessage={recoveryMessage} recoveredDraft={recoveredDraft} onVersionChange={onVersionChange} onReload={onReload} onSaveCopy={onSaveCopy} />
