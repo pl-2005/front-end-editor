@@ -5,7 +5,7 @@
 
 ## 1. 本地缓存命名空间
 
-使用 y-indexeddb，文档名固定为 `web-editor:{userId}:{projectId}:{epoch}`。IndexedDB 记录包含 schemaVersion、lastServerGeneration、pending update sequence、更新时间和受限大小；不存 Session、CSRF、ticket 或 MinIO 凭据。
+使用 y-indexeddb，文档名固定为 `web-editor:{userId}:{projectId}:{epoch}`。IndexedDB 记录包含 schemaVersion、lastServerGeneration、pending update sequence、更新时间和受限大小；不存访问 JWT、刷新凭据、ticket 或 MinIO 凭据。
 
 用户登出、账号切换、项目撤权时立即关闭房间、停止 provider，清除当前内存 Y.Doc/Monaco/Sandpack 和对应 IndexedDB doc、pending queue；不得读取其他 userId 记录。旧 V1 draft 只能显式导入，导入前重新通过服务端 PROJECT_EDIT 和大小校验。
 
@@ -24,7 +24,7 @@
 
 ## 3. Presence
 
-Awareness 只发送短暂 cursor、selection、activeFileId、displayName、avatarColor 和受限状态；服务端以内省 userId 覆盖身份。Presence 有 TTL/心跳和断开清理，不写 MySQL、revision、audit 或 Y.Doc。
+Awareness 只发送短暂 cursor、selection、activeFileId、displayName、avatarColor 和受限状态；服务端以内省 userId 覆盖身份。Presence 有 TTL/心跳和断开清理，不写 MySQL、revision 或 Y.Doc。
 
 渲染按 userId+connectionId 去重；同一用户多标签页分别显示或合并为明确规则。文本选择范围经过文件长度/行列预算校验，禁止携带源码大块、token 或任意 JSON。
 
@@ -42,7 +42,7 @@ Awareness 只发送短暂 cursor、selection、activeFileId、displayName、avat
 
 ## 5. 与 Sandpack 和保存链路
 
-离线期间 Sandpack 只运行本地 Y.Doc 派生文件，预览结果标记为本地未同步。服务端新增旧写入硬门：当项目 `collaboration_mode=ENABLED`（即使 generation=0）时，PUT /api/projects/{id}/snapshot、旧 revision 写入口和旧恢复入口统一返回 409 `COLLABORATIVE_PROJECT_REQUIRES_CHECKPOINT`；只有 mode=DISABLED 才允许 V1 链路。客户端旧 useProjectSave 不得上传完整快照；checkpoint facade 仅在步骤 09 支持 durable flush 后调用，否则显式 unavailable。
+离线期间 Sandpack 只运行本地 Y.Doc 派生文件，预览结果标记为本地未同步。服务端旧写入硬门覆盖 `collaboration_mode=PILOT/ENABLED`（即使 generation=0）或 generation>0：PUT /api/projects/{id}/snapshot、旧 revision 写入口和旧恢复入口统一返回 409 `COLLABORATIVE_PROJECT_REQUIRES_CHECKPOINT`；只有 mode=DISABLED 且 generation=0 才允许 V1 链路。客户端旧 useProjectSave 不得上传完整快照；checkpoint facade 仅在步骤 09 支持 durable flush 后调用，否则显式 unavailable。
 
 重连成功后先完成服务端同步和结构不变量校验，再恢复预览“已同步”标志。generation durable、WebSocket synced、checkpoint created 三个状态分别展示。
 
@@ -56,7 +56,7 @@ Awareness 只发送短暂 cursor、selection、activeFileId、displayName、avat
 
 ## 7. 发布与验收
 
-只对项目白名单开启：白名单切换 `collaboration_mode=ENABLED` 与网关开关同一受控事务/发布步骤；撤权/登出测试必须验证内存和 IndexedDB 清理；监控本地队列大小、重连耗时、导出次数、Presence 连接和失败原因。回滚关闭协作入口但保留缓存，禁止旧 REST 快照覆盖 generation>0。
+步骤 08 仅在非生产功能检查中对白名单项目使用 `collaboration_mode=PILOT` 和显式网关开关；生产协作开关保持关闭，不把项目切换为 `ENABLED`。步骤 09 的 fence、Outbox 与撤权链路通过后，才按受控发布流程开启生产协作；网关开关是部署配置，不能与数据库项目状态声称处于同一事务。功能检查确认撤权/登出时内存和 IndexedDB 清理；监控本地队列大小、重连耗时、导出次数、Presence 连接和失败原因。回滚关闭协作入口但保留缓存，禁止旧 REST 快照覆盖 generation>0。
 
 验收：用户/项目/epoch 缓存隔离；离线内容可恢复或导出；重连不会绕过 ACL/epoch；Presence 不进入持久化；结构冲突可解释处理；VIEWER 和撤权用户无写副作用。
 

@@ -5,11 +5,11 @@
 
 ## 1. V12 数据模型
 
-创建 `collab_control_event`：aggregate_type/id、aggregate_sequence、event_type、payload（含 sourceEpoch/targetEpoch）、created_at、published_at、attempts、last_error；唯一聚合序号。敏感业务变更、audit_log 和该 Outbox 行在同一数据库事务写入，先提交业务事实再由 publisher 重试发送；发布失败不回滚事实。
+创建 `collab_control_event`：aggregate_type/id、aggregate_sequence、event_type、payload（含 sourceEpoch/targetEpoch）、created_at、published_at、attempts、last_error；唯一聚合序号。需要通知网关的业务变更与该 Outbox 行在同一数据库事务写入，先提交业务事实再由 publisher 重试发送；发布失败不回滚事实。
 
 创建 `collab_operation`：operation_id、project_id、operation_type CHECKPOINT/RESTORE/DELETE/REVOKE、expected_project_version、expected_epoch/generation、state PREPARED/COMMITTED/ABORTED、fence_token、target_epoch、captured_generation、idempotency_key、lease_expires_at、created/updated_at、error_code。
 
-唯一约束覆盖 operation idempotency key 和 project+active destructive operation。写入业务表、审计和 Outbox 必须同一数据库事务。
+唯一约束覆盖 operation idempotency key 和 project+active destructive operation。项目恢复、删除等操作写入业务表和所需 Outbox 时必须处于同一数据库事务；`collab_operation` 保留协调状态。
 
 ## 2. Capture/检查点
 
@@ -19,7 +19,7 @@ Spring 重新规范化文件、检查 V1 白名单/大小/入口并 SHA-256，�
 
 - MANUAL/AUTO/LEAVE：同一 collab epoch+generation+hash 可复用已有 revision，但单调更新 last_checkpoint_generation；
 - RESTORE：即使 hash 相同也创建新 revision；
-- source 固定枚举，created_by 为实际用户或 SYSTEM。
+- source 固定枚举；MANUAL/RESTORE 的 `created_by` 为实际用户，AUTO/LEAVE 的 `created_by` 为空，系统触发由 source 表达。
 
 revision 写入对象后再提交 DB 指针；对象失败不提交，DB失败对象进入步骤 05 清理租约。响应包含 version、stateVersion/current_version、capturedGeneration。超时由 requestId 对账，不能重复创建版本。
 
@@ -31,20 +31,20 @@ revision 写入对象后再提交 DB 指针；对象失败不提交，DB失败�
 2. 请求网关 fence：停止新写入，等待 dirtySequence durable，关闭/冻结旧房并返回 durable-close ACK、fenceToken、source epoch、capturedGeneration；若 ACK/租约不可得则 503，不进入数据库变更；
 3. 重新检查 If-Match、current_version、epoch/generation 和项目/用户权限；
 4. 从目标 revision 读取并校验，写新 RESTORE revision（不覆盖历史对象）；
-5. 在同一事务锁定并 CAS source epoch，递增 current_version/stateVersion，切换 epoch=old+1、generation=0、bootstrap_revision_version=new version、last checkpoint 字段，写含 sourceEpoch/targetEpoch 的审计和 Outbox；旧 epoch 不可能再被接受；
+5. 在同一事务锁定并 CAS source epoch，递增 current_version/stateVersion，切换 epoch=old+1、generation=0、bootstrap_revision_version=new version、last checkpoint 字段，写含 sourceEpoch/targetEpoch 的 Outbox；旧 epoch 不可能再被接受；
 6. COMMITTED 后调用网关 finalize，关闭旧房并让新连接从新 epoch bootstrap。
 
 数据库失败时 ABORTED 并解除 fence；Spring 不可达、租约未知或状态 PREPARED 时 fail closed。长期 PREPARED recovery job 查询提交痕迹后只能补 finalize 或安全 ABORTED，禁止猜测。
 
 ## 4. Delete
 
-删除是软删除：fence+flush 后锁 project/collab_document，检查版本，写 deleted 状态和 Outbox，COMMITTED 后关闭房间。对象和审计保留窗口由步骤 10/治理策略处理；不硬删 collab_document 或历史 revision。
+删除是软删除：fence+flush 后锁 project/collab_document，检查版本，写 deleted 状态和 Outbox，COMMITTED 后关闭房间。对象保留窗口由步骤 10/治理策略处理；不硬删 collab_document 或历史 revision。
 
-恢复已删除项目是显式管理员/OWNER 操作，创建新的 restore revision/epoch；删除请求不可绕过 fence。所有旧 project snapshot/revision 写入口在 collaboration_mode=ENABLED 下固定返回 409。
+恢复已删除项目只允许所属团队 OWNER 显式操作，创建新的 restore revision/epoch；删除请求不可绕过 fence。项目处于 collaboration_mode=PILOT/ENABLED（即使 generation=0）或 generation>0 时，所有旧 project snapshot/revision 写入口固定返回 409。
 
 ## 5. 撤权与 Outbox
 
-步骤 03 的用户禁用、团队移除、项目成员移除、角色降级事务同时写 USER_DISABLED/TEAM_MEMBER_REMOVED/PROJECT_MEMBER_REMOVED/ROLE_DOWNGRADED 事件。Outbox publisher 至少一次调用网关：
+步骤 02/03 的退出所有设备、改密、团队移除、项目成员移除、角色降级事务同时写 USER_LOGGED_OUT/USER_CREDENTIALS_REVOKED/TEAM_MEMBER_REMOVED/PROJECT_MEMBER_REMOVED/ROLE_DOWNGRADED 事件。Outbox publisher 至少一次调用网关：
 
 - 关闭受影响连接；
 - 使房间进入 readOnly/fenced；
@@ -61,18 +61,18 @@ Fence token 为不可猜测随机值，绑定 project/sourceEpoch/operation/leas
 
 ## 7. 测试
 
-单元/集成：manual/auto/leave 去重、restore 同 hash 新 revision、If-Match/stateVersion、对象/DB故障补偿、fence durable-close ACK/lease续期/超时、ACK丢失 fail closed、source epoch CAS、PREPARED recovery、delete/restore、Outbox重复/乱序/重试、撤权实时关房、旧入口409。
+功能检查：manual/auto/leave 去重、restore 同 hash 新 revision、If-Match/stateVersion、对象/DB故障补偿、fence durable-close ACK/lease续期/超时、ACK丢失 fail closed、source epoch CAS、PREPARED recovery、delete/restore、Outbox重复/乱序/重试、撤权实时关房、旧入口409。
 
-双用户 E2E：一人编辑时另一人 checkpoint；恢复期间房间只读并切换 epoch；删除后连接关闭；撤权后旧票据/连接失败；重启 publisher 最终送达。真实 MySQL/MinIO 使用独占资源，不用 Docker。
+按功能流程确认：编辑期间发起 checkpoint、恢复期间房间只读并切换 epoch、删除后连接关闭、撤权后旧票据/连接失败、publisher 重启后事件最终送达。不要求双浏览器 E2E 或独占本机 MySQL/MinIO/Redis 集成资源，不用 Docker。
 
 ## 8. 发布与验收
 
-先在白名单项目运行 capture/restore/delete 演练，检查审计、Outbox、对象引用和指标；通过后才扩大。开启 collaboration_mode=ENABLED 的项目必须全部经过本步骤，旧快照链路不存在写入口。
+先在白名单项目运行 capture/restore/delete 演练，检查操作状态、Outbox、对象引用和指标；通过后才扩大。开启 collaboration_mode=ENABLED 的项目必须全部经过本步骤，旧快照链路不存在写入口。
 
 验收：已广播更新不被破坏性操作覆盖；恢复永远新 revision/epoch；删除不会丢历史；撤权最终关闭连接；操作重试可收敛；所有 fence 状态可解释并可恢复。
 
 ## 9. 后续契约
 
-步骤 10 负责安全、性能、故障演练和容量；步骤 11 负责发布流水线、备份恢复和最终 E2E 门禁。
+步骤 10 负责安全、性能、故障恢复和容量；步骤 11 负责发布与最终功能验收。
 
 

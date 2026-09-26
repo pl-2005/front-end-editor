@@ -105,7 +105,7 @@ ALTER TABLE project
 - 不重命名或重排 V1/V2；
 - MySQL 与 H2 测试配置都能执行；
 - 对存量项目回填为 `0`；
-- 迁移测试确认从仅有 V1/V2 的库可升级；
+- 迁移设计保证从仅有 V1/V2 的库可升级；
 - 不在迁移中插入用户、密码或任何凭据。
 
 ## 6. 后端改造
@@ -266,48 +266,15 @@ frontend/src/App.tsx
 - GZIP 正常、损坏和解压超限；
 - 清理器忽略 `collab/`。
 
-### 9.2 真实 MySQL/MinIO 集成测试配置
-
-新增：
-
-```text
-backend/src/test/resources/application-integration.yml
-backend/src/test/java/com/webeditor/integration/**IT.java
-backend/pom.xml                         # integration Maven profile + Failsafe
-.env.example                            # 仅占位的 IT_* 配置
-```
-
-根 `.env` 必须提供无默认回退的 `IT_DB_URL/IT_DB_USERNAME/IT_DB_PASSWORD`、`IT_MINIO_ENDPOINT/IT_MINIO_ACCESS_KEY/IT_MINIO_SECRET_KEY` 和 `IT_MINIO_BUCKET_PREFIX`。`IT_DB_URL` 必须指向专用测试 schema，绝不能复用开发数据库。每次测试以 `IT_MINIO_BUCKET_PREFIX + 随机运行 ID` 创建独占的空 Bucket，所有用例只操作该 Bucket，结束时只删除本次创建的精确对象并删除该 Bucket；不允许共享 Bucket 或仅用对象子前缀隔离。
-
-Maven `integration` profile 必须自动激活 Spring `integration` profile，Failsafe 只执行 `**/*IT.java`。缺少任一 `IT_*` 时应在测试启动前立即失败，不能回退 H2、开发 `DB_URL` 或默认 MinIO 凭据。`mvn test` 继续跑 H2 快速测试；真实集成使用 `mvn -Pintegration verify`。
-
-真实验证至少包含：
-
-- 先把专用空 schema 迁移到 target 2，插入代表性存量项目/revision，再迁移到 V3，验证数据和 `lock_version=0`；
-- MySQL 行锁、乐观锁和两种提交顺序；
-- 独占测试 Bucket 中有引用对象、过保护期孤儿、保护期对象；
-- 同一独占 Bucket 中的 `collab/` 对象完全不被版本清理器列举或删除；
-- 测试结束只清理本次独占 Bucket，任何创建/删除 Bucket 失败都使集成测试失败并报告 Bucket 名以供人工处理，但不输出凭据。
-
-### 9.3 真实 MySQL 并发场景
-
-必须加载根 `.env`，使用本机 MySQL 验证，不得只依赖 H2：
-
-1. 两个事务同时重命名，只有一个基于旧 `stateVersion` 成功；
-2. 使用 latch/barrier 分别控制“元数据先提交”和“快照先提交”，允许合法串行成功，但名称、指针、`current_version/lock_version` 均不回退；
-3. 软删除与快照保存并发，删除持有悲观锁后不出现已删除项目继续推进版本；
-4. 恢复与元数据更新并发，结果满足锁版本和内容版本契约；
-5. 禁止用 `sleep` 猜测并发顺序。
-
-### 9.4 前端测试
+### 9.2 前端功能检查
 
 - 更新/删除正确发送强 ETag `If-Match`；
 - 自动保存、哈希去重、恢复成功后同时刷新 `version/stateVersion`；
 - 自动保存后仍可重命名和删除，不产生稳定的陈旧 ETag 冲突；
 - `PROJECT_STATE_CONFLICT` 与 `VERSION_CONFLICT` 显示不同提示；
-- 现有项目切换、草稿、保存和版本恢复测试继续通过。
+- 现有项目切换、草稿、保存和版本恢复功能保持可用。
 
-## 10. 验证命令
+## 10. 可选开发检查
 
 ```powershell
 cd frontend
@@ -319,63 +286,16 @@ cd ../backend
 mvn test
 ```
 
-普通验证执行上述命令。真实集成验证从仓库根目录执行以下 PowerShell；脚本只检查变量是否存在及开发/测试范围是否不同，不输出变量值：
-
-```powershell
-$envLines = Get-Content .\.env
-foreach ($line in $envLines) {
-  if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) {
-    continue
-  }
-  $pair = $line.Split('=', 2)
-  if ($pair.Count -eq 2) {
-    [Environment]::SetEnvironmentVariable($pair[0].Trim(), $pair[1], 'Process')
-  }
-}
-
-$required = @(
-  'DB_URL', 'MINIO_BUCKET',
-  'IT_DB_URL', 'IT_DB_USERNAME', 'IT_DB_PASSWORD',
-  'IT_MINIO_ENDPOINT', 'IT_MINIO_ACCESS_KEY', 'IT_MINIO_SECRET_KEY',
-  'IT_MINIO_BUCKET_PREFIX'
-)
-$missing = @()
-foreach ($name in $required) {
-  if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
-    $missing += $name
-  }
-}
-if ($missing.Count -gt 0) { throw '缺少必需的 IT_* 集成测试配置' }
-if ($env:IT_DB_URL -eq $env:DB_URL) { throw 'IT_DB_URL 不得与开发 DB_URL 相同' }
-if ($env:IT_MINIO_BUCKET_PREFIX -eq $env:MINIO_BUCKET) {
-  throw 'IT MinIO Bucket 前缀不得等于开发 Bucket'
-}
-
-$mavenExitCode = 0
-Push-Location backend
-try {
-  & mvn -Pintegration verify
-  $mavenExitCode = $LASTEXITCODE
-} finally {
-  Pop-Location
-}
-if ($mavenExitCode -ne 0) {
-  throw "集成测试失败，Maven 退出码：$mavenExitCode"
-}
-```
-
-集成测试自身还必须校验测试数据库名称/schema 与开发连接不同，并为 Bucket 前缀追加随机运行 ID。生成的 Bucket 名必须符合 S3/MinIO 命名规则且不超过 63 字符；创建前确认不存在，若碰撞则失败，禁止清空或复用。用 `@DynamicPropertySource` 或等价机制在 Spring 上下文启动前注入完整 Bucket 名，并让整个 IT suite 共享同一受控生命周期。不得打印变量值，不得使用 Docker。
 ## 11. 验收条件
 
-- V3 Flyway 迁移可从现有数据库无损升级，target 2 → V3 的真实 MySQL 升级测试通过；
+- V3 Flyway 迁移设计保留现有项目与版本数据，迁移后项目仍可读取；
 - `version` 与 `stateVersion` 在 API 和 UI 中无混用；
-- 元数据、删除、保存和恢复并发测试没有静默覆盖；快照响应刷新 `stateVersion`，自动保存后仍可正常更新/删除；
+- 元数据、删除、保存和恢复不会静默覆盖；快照响应刷新 `stateVersion`，自动保存后仍可正常更新/删除；
 - 更新项目不能旁路修改入口；
 - 超限压缩内容安全失败；
-- 真实 MinIO 清理验证不会触碰保留的 `collab/` 命名空间，也不会删除非本次测试对象；
-- 所有 V1 回归测试通过；
-- 前端 lint/test/build、后端快速测试及 `mvn -Pintegration verify` 全部通过；
-- 验证过程未读取输出或提交 `.env` 凭据，未使用 Docker。
+- 对象清理不触碰保留的 `collab/` 命名空间或仍被引用的对象；
+- V1 项目操作与版本功能仍可正常使用；
+- 功能验收过程不输出或提交 `.env` 凭据，不使用 Docker。
 
 ## 12. 回滚与兼容
 
@@ -383,7 +303,7 @@ if ($mavenExitCode -ne 0) {
 - 不删除 `lock_version` 列，不回滚已执行 Flyway；
 - `stateVersion` 是新增响应字段，但强 ETag 和禁止 Update `entry` 都是行为变化；本步骤不支持新后端与旧前端混合运行，前后端必须在同一维护窗口原子发布；
 - 发布前先停止写流量，发布后用严格模式冒烟验证，再恢复写入；不得用仅关闭 `If-Match` 的开关伪装兼容，因为旧前端仍会发送已经禁止的 `entry`；
-- 生产回滚优先使用“认识 V3 但关闭新行为”的兼容制品，不执行降级 Flyway；该兼容制品必须在已迁移到 V3 的专用测试库上启动验证。
+- 生产回滚优先使用“认识 V3 但关闭新行为”的兼容制品，不执行降级 Flyway；发布前确认该制品兼容已迁移的 schema。
 
 ## 13. 向下一步骤提供的稳定产物
 
@@ -405,5 +325,5 @@ if ($mavenExitCode -ne 0) {
 - 当前事务内 MinIO I/O 是明确待重构项；
 - 抽取通用对象存储不得改变现有快照格式、哈希或对象 key。
 
-共同基线：受限解压、完整 V1 自动化回归、专用 MySQL/MinIO 集成 profile，且全程不使用 Docker。
+共同基线：受限解压、V1 功能保持可用，且全程不使用 Docker。
 

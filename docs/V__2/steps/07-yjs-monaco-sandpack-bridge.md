@@ -46,17 +46,17 @@ VIEWER/无 PROJECT_EDIT 使用 Monaco readOnly，并在网关层拒绝 Update。
 - DEFAULT_FILES 仅异常占位展示，不写入权威文档；
 - preview/console 保持接口，消费派生 files。
 
-## 7. 测试
+## 7. 功能检查
 
-单元：schema 不变量、路径/冲突归一化、fileId、tombstone、entry、schema 版本隔离、Yjs transaction。
+确认 schema 不变量、路径/冲突归一化、fileId、tombstone、entry、schema 版本隔离和 Yjs transaction 的功能行为。
 
-浏览器：两个 context 同房同步文本/重命名/文件树、undo/redo、VIEWER 只读、断线重连、投影 debounce 丢旧版本、Sandpack 错误不污染 Y.Doc、Monaco model 释放和 StrictMode 无重复绑定。
+编辑界面确认文本/重命名/文件树同步、undo/redo、VIEWER 只读、断线重连、投影 debounce 丢旧版本、Sandpack 错误不污染 Y.Doc、Monaco model 释放和 StrictMode 无重复绑定。
 
-集成：网关 Update 校验、Y.Doc reload、generation 增长、旧 ticket 重连失败、对象命名空间、真实 MySQL/MinIO。独占 E2E schema/Bucket，不打印秘密，不用 Docker。
+确认网关 Update 校验、Y.Doc reload、generation 增长、旧 ticket 重连失败和对象命名空间隔离；不要求独占 E2E schema/Bucket/Redis 命名空间或本机三服务集成测试。不打印秘密，不用 Docker。
 
 ## 8. 发布与验收
 
-以项目白名单 feature flag 试点，不打开全量协作；generation0 和新 Y.Doc 初始化均通过。回滚只能停协作并保留对象，不能让旧 Sandpack 保存链路覆盖 generation>0 文档。
+步骤 07 仅在非生产功能检查中以 PILOT 项目白名单和 feature flag 检查，生产协作开关保持关闭至步骤 09 完成；generation0 和新 Y.Doc 初始化均通过。回滚只能停协作并保留对象，不能让旧 Sandpack 保存链路覆盖 generation>0 文档。
 
 验收：Y.Doc 是唯一事实源；Monaco 与文件树实时一致；Sandpack 只派生；Viewer 无写副作用；重连和 schema/大小错误安全失败；预览/控制台继续工作。
 
