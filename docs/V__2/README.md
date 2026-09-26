@@ -17,17 +17,9 @@
 11. [步骤 10：安全、可观测性、性能与恢复](./steps/10-security-observability-performance-recovery.md)
 12. [步骤 11：发布、回滚与最终 E2E](./steps/11-release-deploy-and-final-e2e.md)
 
-## 当前进度（2026-09-26）
+## 项目进度
 
-| 步骤 | 状态 | 实时记录 |
-| --- | --- | --- |
-| 06：协作网关、短期票据与内部协议 | 单实例验收通过 | [实施与验收记录](./step-06-implementation.md) |
-| 07：Yjs 文件模型、Monaco 与 Sandpack 派生桥 | 验收通过 | [实施记录](./step-07-implementation.md) |
-| 08：离线更新、Presence 与结构操作 | 验收通过 | [实施记录](./step-08-implementation.md) |
-| 09：检查点、恢复、删除与 Fence | 单网关本地完整验收通过 | [实施记录](./step-09-implementation.md) |
-| 10：安全、可观测性、性能与恢复 | 本机代码与隔离资源验收通过；待 staging 运维演练 | [实施记录](./step-10-implementation.md) |
-
-步骤 10 最新本机验收结果与尚待 staging 的门禁详见[步骤 10 实施记录](./step-10-implementation.md)。此前步骤 06 的联合验收证据仍见其[实施记录](./step-06-implementation.md)。
+进度记录已重置。步骤 01–11 当前均标记为未开始；完成实现和验收后，再在本节更新状态并链接对应记录。
 
 验收范围为单网关实例。步骤 09 控制路由仍保持 fail closed，生产协作开关保持关闭。
 
