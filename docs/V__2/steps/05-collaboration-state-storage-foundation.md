@@ -1,99 +1,31 @@
-# 步骤 05：协作状态与对象存储地基
+# 步骤 05：Y.Doc 初始文件与当前状态持久化
 
-> 前置：步骤 03/04 联合发布完成；所有非旧匿名活动项目已有有效 revision ≥ 1。
-> 目标：建立协作文档描述、Y.Doc 二进制对象存储和 CAS 内部服务；协作功能仍关闭。
+> 前置：步骤 01、03、04。状态：未开始。目标：新项目无需 revision 即有可恢复的权威文件状态。
 
-## 1. V10 数据模型
+## 数据模型
 
-创建 `collab_document`：
+追加 Flyway 迁移创建 `collab_document`，每个 V2 团队项目恰有一行：`project_id`、`collaboration_mode`、`epoch`、`generation`、`object_key`、`content_hash`、`size`、`content_type`、`lock_version` 和时间戳。新项目初始 `epoch=1, generation=1`，对象元数据必须完整。generation 仅表示当前 Y.Doc 指针的 CAS 代次，不供用户浏览。旧匿名项目及其 revision 不创建协作描述，也不回填或认领。
 
-- project_id 主键/FK；
-- epoch BIGINT ≥1；
-- generation BIGINT ≥0；
-- object_key/hash/size/content_type（generation=0 时可空）；
-- bootstrap_revision_version、last_checkpoint_version；
-- last_checkpoint_generation；
-- schema_version、updated_at、lock_version。
+新项目创建先在短数据库事务中保留项目 ID，状态为不可见的 `INITIALIZING`；新迁移将现有 `project.status` 明确约束为 `0=DELETED、1=ACTIVE、2=INITIALIZING`，所有旧/新列表与详情只展示 ACTIVE。服务端模板服务生成规范文件集合，步骤 05 建立共享的 TypeScript Y.Doc 编码模块并由受信内部初始化服务生成和校验初始二进制；Spring 只校验字节上限、哈希及请求元数据后上传 MinIO，不在 Java 中解码 Y.Doc。第二个短事务建立 `collab_document` 并将项目置 ACTIVE。任一步失败则保留不可见初始化记录供重试或补偿，不向用户返回空项目；清理器只在保护窗口和引用复核后删除孤儿对象。项目复制也使用同一初始化流程；步骤 05 只能复制当前持久化指针，房间上线后的复制须先由网关 flush 最新编辑再读取当前指针，不能从旧 revision 复制。浏览器 `DEFAULT_FILES` 仅可作为错误占位，不是持久化来源。
 
-约束：generation 在当前 epoch 单调；generation=0 必须无对象且 bootstrap revision 非空；初始回填 collaboration_mode=DISABLED；步骤 06–08 仅在受控功能检查中将白名单项目切换为 PILOT，步骤 09 完成后生产项目才可切换为 ENABLED；generation>0 必须完整对象元数据；last_checkpoint_generation≤generation；对象键匹配项目/epoch/generation 命名空间。唯一键覆盖 project/epoch/generation 和 object_key。
+初始化服务只允许 Spring 通过内部 HMAC 身份调用，不暴露浏览器或公网；步骤 06 网关复用同一编码模块并完善双向内部协议。初始化服务不能执行用户代码或持有 MinIO 凭据。
 
-仅为 `legacy_unowned=false` 的项目（包括活动、软删除但可恢复项目）按当前 revision 回填唯一行；软删除的团队项目也必须保持一项目一描述，以便恢复。旧匿名项目不生成 `collab_document`：
+## 对象与 CAS
 
-~~~text
-epoch=1
-generation=0
-bootstrap_revision_version=current_version
-last_checkpoint_version=current_version
-last_checkpoint_generation=0
-~~~
+对象仅位于 `collab/projects/{projectId}/epochs/{epoch}/{generation}-{hash}.yjs`，content-type 为 `application/octet-stream`。旧 `projects/` 快照对象保留但不作为 V2 写路径。Spring 内部服务实现：
 
-V10 前置 SQL/应用报告只验证非旧匿名项目的 team/creator/revision/object 指针，并核对旧匿名项目没有协作描述；不合规则失败，不猜测修复。新项目创建事务从本步骤起同时创建 revision1 和 collab_document。
+- `describe(projectId)`：返回当前 epoch、generation、对象键、哈希和大小；
+- `load(projectId, epoch, generation)`：只读当前指针并验证 hash/size；
+- `persist(projectId, expectedEpoch, expectedGeneration, bytes)`：Spring 有界读取并计算哈希/大小，Y.Doc 结构已由网关的共享 TypeScript 模块验证；先上传不可变对象，再条件更新 `WHERE epoch=? AND generation=?`，成功后 generation 加一。
 
-## 2. MinIO 命名空间
+同一幂等键和相同内容重试返回同一结果；CAS 冲突返回 `COLLAB_GENERATION_CONFLICT`，旧 epoch 返回 `COLLAB_EPOCH_CONFLICT`，对象损坏返回脱敏的 `COLLAB_STORAGE_CORRUPT`。不能让数据库事务包住 MinIO 网络 I/O，也不能在 CAS 失败时覆盖当前对象指针。
 
-版本对象继续位于 `projects/{projectId}/revisions/{version}-{hash}.json.gz`；协作对象仅位于 `collab/projects/{projectId}/epochs/{epoch}/{generation}-{hash}.yjs`，content-type 为 application/octet-stream。
+`CollabOrphanCleaner` 只扫描 `collab/`，尊重当前指针、上传/操作租约和有效备份清单；超过备份恢复窗口且双重确认无引用后才删除。备份必须同时保留 MySQL 指针与其指向的 Y.Doc 对象。V1 清理器只扫描 `projects/`，不得碰协作对象。存储上限、路径、schema 和文件大小与网关一致。
 
-浏览器/网关不持有 MinIO 凭据。Spring 内部服务执行上传、读取和校验。最大二进制大小、超时、流式哈希、禁止路径穿越与有界读取由配置固定。严禁现有 revision 清理器扫描 collab/。
+## 旧写入口
 
-新增 CollabOrphanCleaner（步骤05即启用）：只检查 collab_document 当前引用，并通过可扩展 `CollabObjectReferenceProvider` 聚合引用。对象上传先建立带 owner/expiry 的短期写入租约；只有超过“最大上传/CAS时长+安全窗口”、租约过期、连续两轮无引用的对象才删除，删除前最终重检。步骤 09 在启用 operation 写入前原子注册 operation 引用 provider；失败可重试且不影响 revision 清理器。
+V2 新项目不写 `project_revision` 或 JSON/GZIP 快照；现有 `project.current_version` 保持数据库默认 0，`current_object_key` 保持 NULL，只为兼容旧表结构，V2 API 不返回或依赖它们。V1 浏览器 snapshot 保存、revision 列表/创建和历史恢复接口对 V2 项目固定关闭；旧匿名项目仍隔离。项目元数据使用独立 `lock_version`。软删除在网关启用后必须经步骤 09 flush/fence；在协调链路完成前，协作项目删除入口保持关闭。
 
-## 3. CAS 服务
+## 功能验收
 
-`CollabStateService` 提供内部方法，尚不开放公网：
-
-- describe(projectId)：返回 epoch/generation/bootstrap/current object；
-- load(projectId, epoch, generation)：严格按描述读取并验证 hash/size；
-- persist(projectId, expectedEpoch, expectedGeneration, bytes)：验证 Y.Doc 大小后计算 hash，目标 generation=expected+1；
-- bootstrapSnapshot(projectId, expectedEpoch)：Spring 锁定/校验项目 ACTIVE、当前 epoch 相等且 generation=0，只能从 collab_document.bootstrap_revision_version 解析 revision并有界解压；调用方不能选择版本。
-
-persist 顺序：上传不可变对象 → 数据库条件更新 `WHERE epoch=? AND generation=?` → 成功返回新描述。CAS 失败时对象成为候选孤儿，返回 409，不覆盖当前指针。相同目标 key/hash 重试幂等；相同 generation 不同 hash 视为完整性故障并报警。
-
-数据库事务不能包住 MinIO；所有失败点、重试和孤儿补偿都有故障注入测试。稳定结果码：epoch 不同为 409 `COLLAB_EPOCH_CONFLICT`，generation CAS 失败为 409 `COLLAB_GENERATION_CONFLICT`，对象哈希/大小/缺失为 500 `COLLAB_STORAGE_CORRUPT`；同一目标 key/hash 已提交返回当前描述作为幂等成功。
-
-## 4. 内部鉴权边界
-
-预留 `/internal/collaboration/*`，默认不启用路由。步骤 06 使用独立高熵服务凭据、网络限制和请求大小限制启用；绝不接受浏览器 JWT 替代内部凭据。内部调用仍通过 ProjectAccessService 获取授权事实，不把网关传入角色当权威。
-
-## 5. 读写一致性与项目生命周期
-
-状态矩阵：
-
-- feature flag=false 且 generation=0：V1 snapshot、restore、delete 保持可用；snapshot/restore 在更新项目 current_version 的同一数据库事务同步 `bootstrap_revision_version`、`last_checkpoint_version`，last_checkpoint_generation 保持0并递增描述 lock_version；delete 同事务改变项目状态，描述保留。
-- `collaboration_mode=PILOT/ENABLED` 或 generation>0：旧浏览器 snapshot/restore/delete 统一返回 409 `COLLABORATIVE_PROJECT_REQUIRES_CHECKPOINT`，直到步骤09提供协调路径；不得静默覆盖 Y.Doc。
-- 步骤 06–08 可在非生产功能检查中显式开启 feature flag，并仅对 PILOT 项目检查协作功能；生产 feature flag=true 仅在步骤 09 的 fence、Outbox 和撤权链路完成后允许，此时所有写入走协作协调。
-- 普通 REST 元数据更新不改变 collab generation；
-- 项目软删除不立即删除对象；清理器按保留策略处理；
-- collab_document 不硬删除，项目删除状态与后续 fence 由步骤 09 协调；
-- epoch/generation/current_version 各自语义不得混用。
-
-## 6. 功能检查
-
-确认约束、回填、CAS 成败、幂等对象、哈希/大小错误、路径校验和 generation0 行为符合设计。
-
-功能验收覆盖：
-
-- V9→V10 回填计数和唯一性，以及旧实例停写门禁；
-- flag=false 连续 snapshot/restore 同步 generation0 基线，generation>0 旧入口返回固定409；
-- 新项目 revision1+collab_document 同事务；
-- 两个 persist 同 generation 仅一个提交；
-- 上传成功/DB失败产生可清理孤儿，DB成功/对象损坏 readiness/读取失败；
-- revision 与 collab 清理器互不越界，上传租约和删除前最终重检消除 CAS 窗口；
-- 大对象、压缩炸弹和超时受限。
-
-不要求独占 IT schema/Bucket 或本机 MySQL/MinIO 集成测试；运行应用时不打印 `.env` 凭据，不使用 Docker。
-
-## 7. 发布与验收
-
-维护窗口先停止 V9 旧写流量并等待在途请求结束，再执行 V10；只启动具备“revision1 + collab_document”同事务创建和 generation0 兼容推进逻辑的新实例，最后再次对账所有非旧匿名活动项目后开放流量。禁止 V9 实例与回填并发创建。回滚制品必须认识 V10并维持相同创建/同步不变量；不得删除 collab_document 或对象。任何非旧匿名项目缺描述、描述指向无效 revision、对象越界或 CAS 功能检查失败均阻止步骤 06。
-
-验收：每个非旧匿名项目（含可恢复软删项目）恰有一条描述，旧匿名项目没有描述；generation0 语义统一；新项目同步创建描述；上传租约覆盖 upload→CAS 窗口且删除前二次确认；CAS 不丢更新；两个对象命名空间和清理器完全隔离。
-
-## 8. 后续契约
-
-步骤 06 可依赖 describe/load/persist/bootstrapSnapshot 和稳定错误码。步骤 09 在同一模型上增加 collab_operation/fence/outbox；步骤 10 增加巡检、修复和容量指标。
-
-
-
-
-
-
+确认新项目创建后有可加载、哈希匹配的 generation 1 Y.Doc；对象或数据库失败不留下可见空项目；两个并发 persist 只有一个切换当前指针；旧 epoch 不能覆盖当前状态；清理器不碰当前指针或在途对象；V1 revision 不参与新项目初始化。运行应用时使用根 `.env` 的本机 MySQL/MinIO/Redis，不使用 Docker，也不输出凭据。

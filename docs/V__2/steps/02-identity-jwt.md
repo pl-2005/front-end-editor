@@ -2,11 +2,11 @@
 
 > 前置：步骤 01 已完成并通过验收  
 > 后续依赖：步骤 03、04、06  
-> 发布约束：数据库与暗置代码可先部署，但强制认证必须与步骤 04 登录壳原子启用
+> 发布约束：身份代码和登录壳先完成；步骤 11 在完整协作功能就绪后统一启用强制认证与 V2 入口
 
 ## 1. 目标与边界
 
-本步骤引入本地账号、Spring Security、短期 JWT、Redis 刷新凭据和统一 JSON 安全错误。除健康检查与认证入口外，业务 API 均进入认证边界；步骤 03 完成旧项目隔离前，历史匿名项目不向新账号开放。
+本步骤实现本地账号、Spring Security、短期 JWT、Redis 刷新凭据和统一 JSON 安全错误。步骤 11 公开切换后，除明确的匿名健康检查、注册、登录、刷新和团队发现入口外，业务 API 均要求 Bearer 认证；历史匿名项目不向新账号开放。
 
 不实现团队、邀请、协作票据、OAuth/SSO/MFA、邮件找回和完整认证 UI；Redis 仅承担刷新凭据和登录节流，不承担项目元数据或协作房间广播；不使用 Cookie、浏览器持久化 Token 或内存用户仓库。
 
@@ -101,7 +101,7 @@ Redis 只保存刷新凭据摘要、轮换状态和登录节流计数。连接�
 - 匿名登录失败按总方案统一为 401 `AUTHENTICATION_REQUIRED`，不得暴露账号是否存在或密码是否错误。
 - 哈希升级使用行锁或 compare-and-set，防止并发改密后被旧凭据 rehash 覆盖。
 
-凭据撤销规则：改密和退出所有设备在 MySQL 事务中递增 `token_version` 与 `authz_version`。每个受保护请求在 JWT 签名/期限校验后从 MySQL 确认用户存在且 `token_version` 一致；用户不存在或版本不一致返回 401 `AUTHENTICATION_REQUIRED`。Redis 中未及时删除的旧刷新凭据也因版本不一致无法换取新 JWT。步骤 03 的团队/项目授权变化只递增 `authz_version`，服务端每次重新查询 ACL，不从 JWT 的角色声明授权。
+凭据撤销规则：改密和退出所有设备在 MySQL 事务中递增 `token_version` 与 `authz_version`。每个受保护请求在 JWT 签名/期限校验后从 MySQL 确认用户存在且 `token_version` 一致；用户不存在或版本不一致返回 401 `AUTHENTICATION_REQUIRED`。Redis 中未及时删除的旧刷新凭据也因版本不一致无法换取新 JWT。步骤 03 的团队成员关系变化只递增 `authz_version`，服务端每次重新查询当前成员关系，不从 JWT 的角色声明授权。
 
 登录节流使用 Redis 中有 TTL 的原子计数器，键为规范化登录标识摘要与可信客户端 IP 摘要；容量和过期策略明确配置。仅在明确可信代理列表后解析转发头；成功清理账号维度状态，响应不泄露账号存在性。Redis 不可用时登录和注册限流路径失败关闭。
 
@@ -165,7 +165,7 @@ PUT  /api/auth/password
 
 `JwtAuthenticationFilter` 作为单个 `OncePerRequestFilter` 注册在 `SecurityFilterChain` 中，位于匿名认证和授权判断之前，不再额外注册为 Servlet Filter，也不启用另一套 Bearer 认证过滤器。它对受保护路径要求且只接受一个格式正确的 Bearer 凭据；缺失、重复或格式错误均返回 401。登录、注册、刷新和上述匿名 GET 不由该过滤器强制认证；刷新接口自行校验请求体中的刷新凭据。
 
-过滤器用 Spring Security JWT 解码器验证 JWT，先完成签名与声明检查，再按 `sub` 查询 MySQL：用户必须存在，且数据库 `token_version` 与 JWT 一致。通过后用数据库中的用户 ID 构造已认证的 `Authentication`，放入本请求的 `SecurityContext`；`CurrentUser` 从该上下文取得身份，Controller 不自行解析 JWT。团队/项目角色和 capabilities 不从 JWT 或 `Authentication` 的旧快照直接决定，服务层始终查询当前 ACL。过滤器在请求结束时清理上下文，不跨请求保存，也不创建 Session。JWT 无效、用户不存在或版本不符时不建立 `Authentication`，由统一认证入口返回 JSON 401；异常时清理上下文。鉴权不足由统一拒绝处理器返回 JSON 403。
+过滤器用 Spring Security JWT 解码器验证 JWT，先完成签名与声明检查，再按 `sub` 查询 MySQL：用户必须存在，且数据库 `token_version` 与 JWT 一致。通过后用数据库中的用户 ID 构造已认证的 `Authentication`，放入本请求的 `SecurityContext`；`CurrentUser` 从该上下文取得身份，Controller 不自行解析 JWT。服务层查询当前团队成员关系；成员管理额外检查 OWNER，不从 JWT 或 `Authentication` 的旧快照决定权限。过滤器在请求结束时清理上下文，不跨请求保存，也不创建 Session。JWT 无效、用户不存在或版本不符时不建立 `Authentication`，由统一认证入口返回 JSON 401；异常时清理上下文。鉴权不足由统一拒绝处理器返回 JSON 403。
 
 ### 8.2 JSON 登录落地流程
 
@@ -179,7 +179,7 @@ PUT  /api/auth/password
 
 登录、注册与 `/me` 共用同一个安全用户 DTO，只含 `id/username/email/displayName/avatarColor`，不含平台角色、全局管理员能力、哈希或 `authzVersion`。只有登录/刷新响应的专用字段包含凭据，`/me` 不重复返回凭据。
 
-修改密码验证当前密码，在 MySQL 事务内更新哈希、时间、`token_version` 和 `authz_version`，返回 204 后要求所有设备重新登录；Redis 旧刷新凭据因版本不匹配无法使用，后台可按 user ID 清理。`POST /api/auth/logout` 使用当前 Bearer JWT，在 MySQL 中递增 `token_version` 与 `authz_version`，使该用户所有访问 JWT、刷新凭据和未消费协作票据失效，然后清理当前页内存凭据并返回 204。步骤 09 接入 Outbox 后，改密写 `USER_CREDENTIALS_REVOKED`、退出写 `USER_LOGGED_OUT`，同步关闭该用户现有协作连接。退出登录在本期定义为“退出所有设备”，避免依赖 Redis 删除成功作为唯一撤销条件。
+修改密码验证当前密码，在 MySQL 事务内更新哈希、时间、`token_version` 和 `authz_version`，返回 204 后要求所有设备重新登录；Redis 旧刷新凭据因版本不匹配无法使用，后台可按 user ID 清理。`POST /api/auth/logout` 使用当前 Bearer JWT，在 MySQL 中递增 `token_version` 与 `authz_version`，使该用户所有访问 JWT、刷新凭据和未消费协作票据失效，然后清理当前页内存凭据并返回 204。步骤 09 接入 Outbox 后，改密写 `USER_CREDENTIALS_REVOKED`、退出写 `USER_LOGGED_OUT`；网关消费事件后关闭该用户现有协作连接，投递失败重试并告警。退出登录在本期定义为“退出所有设备”，避免依赖 Redis 删除成功作为唯一撤销条件。
 
 Filter 层直接生成现有 `ApiError`：缺失、过期、签名/声明错误或版本失效的 JWT 返回 401 `AUTHENTICATION_REQUIRED`；已认证但动作不足返回 403 `ACCESS_DENIED`。不能依赖 Controller 的全局异常处理器。
 
@@ -195,7 +195,7 @@ Filter 层直接生成现有 `ApiError`：缺失、过期、签名/声明错误�
 - client 支持 JSON、204、非 JSON 错误、`AbortSignal`，且不记录密码、访问 JWT 或刷新凭据。
 - projects API 迁移到统一 client，并保留步骤 01 的 ETag 行为。
 
-步骤 02 不单独面向用户发布。唯一开关为 `AUTH_ENFORCEMENT_ENABLED`，默认 `false`。关闭时旧 `/api/projects/**` 保持匿名；新身份端点按本步骤的 JWT/刷新契约运行。开启时一次性启用完整 Bearer 认证；历史匿名项目仍保持不可见，不能部分开启。仅当步骤 02–04 功能验收完成且登录入口、401 导航可用时启用。两种状态均按 SecurityFilterChain 请求矩阵检查功能。步骤 03/04 联合发布时由 V9 在事务中把 `auth_cutover_state.auth_required_cutover=true`；此后配置缺失或 false 必须拒绝启动/保持 readiness 503，任何回滚制品也必须强制认证并 fail closed，绝不能恢复匿名项目路径。步骤 02 暗置期回滚才允许关闭开关。
+步骤 02 不单独面向用户发布。`AUTH_ENFORCEMENT_ENABLED` 默认 `false`；切换前旧 V1 入口按原行为运行，新身份端点仅供受控功能检查。只有步骤 01–10 的身份、团队、新项目 Y.Doc、协作、删除和撤权功能全部就绪，步骤 11 才在停写窗口启用完整 Bearer 认证与新 UI，并以独立数据库事务设置 `auth_cutover_state.auth_required_cutover=true`。此后配置缺失或 false 必须拒绝启动/保持 readiness 503，回滚制品也必须强制认证并拒绝匿名项目及旧版本入口。切换前后的 SecurityFilterChain 请求矩阵均需核对。
 
 ## 10. 错误码
 
@@ -237,11 +237,11 @@ mvn test
 - 强制认证开启后匿名用户不能访问项目，登录用户只能访问所属团队授权的项目；历史匿名项目按步骤 03 的隔离规则保持不可访问。
 - Filter 错误为统一 JSON，前端 client 可完整处理 Bearer 认证与刷新失败。
 - 注册、登录、刷新、退出和改密的功能验收通过。
-- 只允许维护窗口原子启用步骤 02–04；先停止旧写流量，执行存量项目处理和自助注册/登录冒烟，再切换带登录壳的前端并开启 `AUTH_ENFORCEMENT_ENABLED`。仅在步骤 03 cutover 前可关闭开关回退；cutover 后回滚仍强制认证并 fail closed。旧 V1 前端不得连接已开启认证的新后端。
-- Flyway 不回滚；兼容回滚制品需认识 V3–V5、当前 JWT 签名密钥/`kid` 与 Redis 刷新凭据命名空间且默认拒绝匿名。刷新凭据按 TTL 过期。
+- 步骤 11 在完整 V2 制品就绪后，先停止旧写流量并执行全部迁移，再原子切换登录壳、API 和网关入口。认证切换前可继续保留 V1 入口；切换后回滚仍强制认证并 fail closed，旧 V1 前端不得连接新后端。
+- Flyway 不回滚；兼容回滚制品需认识最终已执行的全部迁移、当前 JWT 签名密钥/`kid` 与 Redis 刷新凭据格式，并默认拒绝匿名。刷新凭据按 TTL 过期。
 
 ## 13. 向后续步骤交付
 
 - 步骤 03：`app_user`、稳定 user ID、`token_version`/`authz_version`、JWT Bearer 校验、`CurrentUser`、强制认证和历史匿名项目 fail-closed 规则；迁移从 V6 开始。
-- 步骤 04：稳定的 register/login/refresh/logout/me/password API 与统一前端 client；负责最终登录壳和认证开关发布门禁。
+- 步骤 04：稳定的 register/login/refresh/logout/me/password API 与统一前端 client；登录壳先完成，公开切换由步骤 11 执行。
 - 步骤 06：用户 ID、显示名、颜色和版本；协作票据携带版本，握手必须向 Spring 内省并与数据库当前值比较。

@@ -1,65 +1,41 @@
-# 步骤 07：Yjs 文件模型、Monaco 与 Sandpack 派生桥
+# 步骤 07：Yjs、Monaco 语言服务与 Sandpack 派生桥
 
-> 前置：步骤 06 网关内省、加载、持久化和服务端 Update 校验通过。  
-> 目标：Y.Doc 成为唯一编辑事实源，Monaco 负责文本编辑，Sandpack 只消费派生文件。
+> 前置：步骤 06 网关握手、同步和自动持久化可用。状态：未开始。
 
-## 1. 依赖与切换范围
+## 唯一编辑源
 
-新增前端依赖：Yjs、y-monaco、Hocuspocus client、y-indexeddb、Monaco。固定版本并记录 bundle 预算。保留 SandpackPreview/Console，移除 SandpackCodeEditor 作为权威编辑器；步骤 08 才增加离线队列和完整 Presence。
+前端引入 Yjs、y-monaco、Hocuspocus client、y-indexeddb、Monaco。ProjectWorkspace 依次获取项目授权和票据、连接房间、校验 Y.Doc schema、创建文件树/Monaco，再向 Sandpack 单向派生运行文件。旧 SandpackCodeEditor 与 `useProjectSave` 的 V1 完整快照上传退出 V2 主链路；不提供检查点 facade、revision 写入口或版本历史 UI。
 
-ProjectWorkspace 初始化顺序：权限/票据 → WS 房间 → Y.Doc schema 校验 → 文件树/Monaco → 单向派生 Sandpack。连接失败显示只读或失败状态，不回退匿名 REST 写入。
+Y.Doc schema：
 
-## 2. Y.Doc Schema
-
-~~~text
+```text
 meta: Y.Map { schemaVersion, projectId, epoch, entryFileId }
 files: Y.Map<fileId, Y.Map { id, path, language, deletedAt, content:Y.Text }>
 fileOrder: Y.Array<fileId>
-~~~
+```
 
-fileId 是稳定 UUID，路径不是身份。创建、重命名、逻辑删除、入口切换在一个 Yjs transaction 内完成。入口不可删除；删除写 tombstone。每次 transaction 后校验文件数、路径归一化、大小、entry 和 V1 白名单。
+`fileId` 是稳定身份，路径不是。创建、重命名、逻辑删除与入口切换在 Yjs transaction 内完成；路径做 Unicode NFKC、分隔符与遍历检查。入口不可删除；同路径并发冲突按稳定 fileId 归一化并提示。无法识别的 schema 只读隔离，不能自动覆盖。
 
-路径规则：Unicode NFKC、/ 分隔、禁止 .、..、反斜杠、NUL、绝对路径；同路径并发冲突使用稳定 fileId 归一化，胜者保留路径，其余生成带短 ID 的冲突路径并提示。不可识别 schemaVersion 只读隔离，不迁移覆盖。
+## Monaco 与可扩展语言能力
 
-## 3. Monaco
+每个活动 fileId 绑定一个 Monaco model，虚拟 URI 含 userId/projectId/epoch/规范路径，以支持项目内相对导入；重命名重建 URI 并清除旧诊断。所有有效团队成员可编辑；撤权或房间暂停时停止输入。输入、接受补全、撤销/重做均写 Y.Text；语言服务只读取派生 model，不直接写 Y.Doc。
 
-每个活动 fileId 一个 Monaco model，URI 使用 web-editor://project/{projectId}/file/{fileId}，销毁时释放 model。y-monaco 双向绑定只对当前 Y.Text 生效；切换文件先解绑旧 model，再绑定新 model，避免监听器重复。
+| 类型 | 补全与提示 | 静态检查 |
+| --- | --- | --- |
+| `.html` | 标签、属性、常用值、关闭标签 | 语法和标签/属性诊断 |
+| `.css` | 选择器、属性、值与单位 | 语法、属性和值诊断 |
+| `.js` | 关键字、项目符号、DOM API、相对导入、JSDoc | 语法与启用 checkJs 的静态类型诊断 |
 
-VIEWER/无 PROJECT_EDIT 使用 Monaco readOnly，并在网关层拒绝 Update。输入、撤销/重做、composition、粘贴和大文本均走 Yjs transaction；禁止直接修改 Sandpack 文件对象。
+HTML/CSS 不称作类型检查；Sandpack 构建/运行错误仍在 Preview/Console 显示。诊断按内容版本防抖；删除、重命名、项目/epoch 切换、注销或撤权时清理旧任务/model。大文件超出语言预算时保留基础编辑和高亮，提示诊断暂不可用，不阻断同步和持久化。
 
-文件树操作调用结构命令，不能通过路径字符串直接写 Y.Map。入口切换显示 PROJECT_MANAGE；结构操作要求 PROJECT_EDIT。
+文件类型注册表统一映射扩展名、Monaco languageId、提供者、worker 配置和释放逻辑。`.json`、`.txt`、`.md` 可先提供基础编辑。新增类型必须同时更新前端注册表、后端/网关白名单、Sandpack 预览能力与验收项；不改变 fileId 或 Y.Doc 协议。
 
-## 4. Sandpack 派生桥
+## 派生预览与状态
 
-订阅 Y.Doc transaction，在 React 外部 store 中做有界、可取消的投影：读取 active 非删除文件，按 fileId/path 生成 Sandpack files，校验 entry/白名单/总大小，再更新 SandpackProvider。派生桥单向 Y.Doc→Sandpack；运行时修改不得回写 Y.Doc。投影采用版本号和 debounce，旧投影完成后丢弃；预览错误不阻塞协作持久化。
+Y.Doc → 文件树、Monaco、Sandpack files 单向投影；Sandpack 运行时补丁不能反写。投影有界、防抖且可取消，旧结果丢弃。界面区分 connecting/syncing/online/offline/reconnecting/forbidden/failed，并独立显示 WebSocket 已同步与 Y.Doc generation 已持久化；不显示历史版本或检查点状态。
 
-## 5. 连接与状态 UI
+项目切换、注销、撤权和 epoch 变化时销毁 Provider、Y.Doc observers、Monaco binding/model、worker 与 Awareness listener。重连申请新票据，不复用旧授权。
 
-显示 connecting/syncing/online/offline/reconnecting/forbidden/failed；区分 WebSocket 已同步、Y.Doc generation 已持久化和历史 checkpoint。重连重新申请 ticket。房间 userId/displayName/avatarColor/capabilities 来自网关内省，Awareness 只展示 cursor/selection/activeFileId；客户端不把角色放入 Y.Doc。
+## 功能验收
 
-## 6. 迁移现有代码
-
-- App.tsx/ProjectWorkspace 接入 CollabProvider；
-- EditorWorkspace 替换 SandpackCodeEditor 为 Monaco；
-- 文件树从 Y.Map/fileOrder 渲染；
-- useProjectSave 改为只调用 checkpoint facade，不能每 1.5 秒上传完整快照；
-- DEFAULT_FILES 仅异常占位展示，不写入权威文档；
-- preview/console 保持接口，消费派生 files。
-
-## 7. 功能检查
-
-确认 schema 不变量、路径/冲突归一化、fileId、tombstone、entry、schema 版本隔离和 Yjs transaction 的功能行为。
-
-编辑界面确认文本/重命名/文件树同步、undo/redo、VIEWER 只读、断线重连、投影 debounce 丢旧版本、Sandpack 错误不污染 Y.Doc、Monaco model 释放和 StrictMode 无重复绑定。
-
-确认网关 Update 校验、Y.Doc reload、generation 增长、旧 ticket 重连失败和对象命名空间隔离；不要求独占 E2E schema/Bucket/Redis 命名空间或本机三服务集成测试。不打印秘密，不用 Docker。
-
-## 8. 发布与验收
-
-步骤 07 仅在非生产功能检查中以 PILOT 项目白名单和 feature flag 检查，生产协作开关保持关闭至步骤 09 完成；generation0 和新 Y.Doc 初始化均通过。回滚只能停协作并保留对象，不能让旧 Sandpack 保存链路覆盖 generation>0 文档。
-
-验收：Y.Doc 是唯一事实源；Monaco 与文件树实时一致；Sandpack 只派生；Viewer 无写副作用；重连和 schema/大小错误安全失败；预览/控制台继续工作。
-
-## 9. 后续契约
-
-步骤 08 接管 y-indexeddb 离线更新、Presence 和结构命令冲突 UX。步骤 09 的 checkpoint/restore/delete 只通过协调 facade，不由编辑器直写 revision。
+确认多文件同步、结构操作、undo/redo、Sandpack 预览和控制台正常；HTML/CSS/JS 补全与诊断、JS checkJs 类型错误和跨文件导入可用；旧诊断不残留；编辑后 generation 自动增长且网关重启可加载当前文件。确认没有 V1 完整快照上传、revision 创建或版本控制 UI。无需双浏览器自动化验收；运行应用使用根 `.env` 本机服务，不使用 Docker。
