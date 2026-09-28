@@ -52,7 +52,7 @@ describe('useProjectSave', () => {
 
   it('debounces edits and reports the saved version', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(response({
-      data: { version: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' },
+      data: { version: 1, stateVersion: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' },
       message: 'ok',
       status: 200,
     })))
@@ -90,7 +90,7 @@ describe('useProjectSave', () => {
     const firstSave = deferred<Response>()
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => firstSave.promise)
-      .mockImplementation(() => Promise.resolve(response({ data: { version: 2, contentHash: 'second', savedAt: '2026-09-20T00:00:01Z' }, message: 'ok', status: 200 })))
+      .mockImplementation(() => Promise.resolve(response({ data: { version: 2, stateVersion: 2, contentHash: 'second', savedAt: '2026-09-20T00:00:01Z' }, message: 'ok', status: 200 })))
     vi.stubGlobal('fetch', fetchMock)
     render(<SaveHarness />)
 
@@ -101,7 +101,7 @@ describe('useProjectSave', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
 
     await act(async () => {
-      firstSave.resolve(response({ data: { version: 1, contentHash: 'first', savedAt: '2026-09-20T00:00:00Z' }, message: 'ok', status: 200 }))
+      firstSave.resolve(response({ data: { version: 1, stateVersion: 1, contentHash: 'first', savedAt: '2026-09-20T00:00:00Z' }, message: 'ok', status: 200 }))
       await vi.advanceTimersByTimeAsync(0)
     })
     vi.useRealTimers()
@@ -113,7 +113,7 @@ describe('useProjectSave', () => {
 
   it('saves immediately with Ctrl+S', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(response({
-      data: { version: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }, message: 'ok', status: 200,
+      data: { version: 1, stateVersion: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }, message: 'ok', status: 200,
     })))
     vi.stubGlobal('fetch', fetchMock)
     render(<SaveHarness />)
@@ -128,7 +128,7 @@ describe('useProjectSave', () => {
   it('retries a retained draft when the browser comes back online', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new TypeError('网络不可用'))
-      .mockResolvedValueOnce(response({ data: { version: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }, message: 'ok', status: 200 }))
+      .mockResolvedValueOnce(response({ data: { version: 1, stateVersion: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }, message: 'ok', status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     render(<SaveHarness />)
 

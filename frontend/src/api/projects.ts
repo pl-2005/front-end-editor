@@ -21,9 +21,12 @@ export const createProject = (name: string, entry = '/index.html') => request<Pr
 })
 export const updateProject = (project: ProjectSummary, name: string) => request<ProjectSummary>(`/api/projects/${project.id}`, {
   method: 'PUT',
-  body: JSON.stringify({ name, description: project.description, template: project.template, entry: project.entry }),
+  headers: { 'If-Match': `"project-${project.id}-${project.stateVersion}"` },
+  body: JSON.stringify({ name, description: project.description, template: project.template }),
 })
-export const deleteProject = (id: number) => request<void>(`/api/projects/${id}`, { method: 'DELETE' })
+export const deleteProject = (project: Pick<ProjectSummary, 'id' | 'stateVersion'>) => request<void>(`/api/projects/${project.id}`, {
+  method: 'DELETE', headers: { 'If-Match': `"project-${project.id}-${project.stateVersion}"` },
+})
 export const saveSnapshot = (id: number, expectedVersion: number, entry: string, files: ProjectFiles) =>
   request<SnapshotSaved>(`/api/projects/${id}/snapshot`, {
     method: 'PUT', body: JSON.stringify({ expectedVersion, entry, files }),

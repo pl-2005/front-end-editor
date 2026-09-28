@@ -55,7 +55,7 @@ public class SnapshotService {
                                     project.getCurrentVersion())
                             .orElseThrow(() -> new IllegalStateException("Current project revision is missing"));
                     if (current.getContentHash().equals(encoded.hash())) {
-                        return new ProjectResponses.SnapshotSaved(current.getVersion(), current.getContentHash(),
+                        return new ProjectResponses.SnapshotSaved(current.getVersion(), project.getLockVersion(), current.getContentHash(),
                                 current.getCreatedAt());
                     }
                 }
@@ -72,7 +72,7 @@ public class SnapshotService {
                 projects.save(project);
                 revisions.flush();
                 projects.flush();
-                return new ProjectResponses.SnapshotSaved(nextVersion, encoded.hash(), revision.getCreatedAt());
+                return new ProjectResponses.SnapshotSaved(nextVersion, project.getLockVersion(), encoded.hash(), revision.getCreatedAt());
             });
         } catch (RuntimeException exception) {
             cleanupOrphan(uploadedKey.get(), exception);
@@ -108,7 +108,7 @@ public class SnapshotService {
                 projects.save(project);
                 revisions.flush();
                 projects.flush();
-                return new ProjectResponses.SnapshotSaved(nextVersion, source.getContentHash(),
+                return new ProjectResponses.SnapshotSaved(nextVersion, project.getLockVersion(), source.getContentHash(),
                         restored.getCreatedAt());
             });
         } catch (RuntimeException exception) {

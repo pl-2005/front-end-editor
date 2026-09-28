@@ -17,6 +17,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class SnapshotCodec {
+    private static final int MAX_COMPRESSED_BYTES = 12 * 1024 * 1024;
+    private static final int MAX_UNCOMPRESSED_BYTES = 10 * 1024 * 1024;
     private final ObjectMapper objectMapper;
 
     public SnapshotCodec(ObjectMapper objectMapper) {
@@ -42,8 +44,24 @@ public class SnapshotCodec {
     }
 
     public SnapshotDocument decode(byte[] compressed) {
-        try (var gzip = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
-            return objectMapper.readValue(gzip.readAllBytes(), SnapshotDocument.class);
+        if (compressed == null || compressed.length > MAX_COMPRESSED_BYTES) {
+            throw new StorageException("Project snapshot exceeds compressed size limit");
+        }
+        try (var gzip = new GZIPInputStream(new ByteArrayInputStream(compressed));
+             var output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            int count;
+            while ((count = gzip.read(buffer)) != -1) {
+                total += count;
+                if (total > MAX_UNCOMPRESSED_BYTES) {
+                    throw new StorageException("Project snapshot exceeds decompressed size limit");
+                }
+                output.write(buffer, 0, count);
+            }
+            return objectMapper.readValue(output.toByteArray(), SnapshotDocument.class);
+        } catch (StorageException exception) {
+            throw exception;
         } catch (IOException exception) {
             throw new StorageException("Could not decode project snapshot", exception);
         }

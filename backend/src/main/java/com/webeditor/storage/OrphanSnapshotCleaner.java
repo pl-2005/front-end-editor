@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class OrphanSnapshotCleaner {
+    private static final String LEGACY_SNAPSHOT_PREFIX = "projects/";
     private static final Logger log = LoggerFactory.getLogger(OrphanSnapshotCleaner.class);
     private final SnapshotStorage storage;
     private final ProjectRevisionRepository revisions;
@@ -37,7 +38,11 @@ public class OrphanSnapshotCleaner {
     public void clean() {
         Instant cutoff = clock.instant().minus(gracePeriod);
         int removed = 0;
-        for (SnapshotStorage.StoredObject object : storage.list("projects/")) {
+        for (SnapshotStorage.StoredObject object : storage.list(LEGACY_SNAPSHOT_PREFIX)) {
+            if (!object.key().startsWith(LEGACY_SNAPSHOT_PREFIX)) {
+                log.warn("Ignoring object outside legacy snapshot namespace");
+                continue;
+            }
             if (object.lastModified().isAfter(cutoff) || revisions.existsByObjectKey(object.key())) {
                 continue;
             }

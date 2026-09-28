@@ -18,8 +18,7 @@ public final class ProjectRequests {
     public record Update(
             @NotBlank @Size(max = 100) String name,
             @Size(max = 500) String description,
-            @Size(max = 30) String template,
-            @Size(max = 255) String entry
+            @Size(max = 30) String template
     ) {
     }
 }

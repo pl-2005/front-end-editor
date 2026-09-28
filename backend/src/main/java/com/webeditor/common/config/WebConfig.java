@@ -19,6 +19,7 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOrigins(allowedOrigins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("Content-Type", "If-Match")
+                .exposedHeaders("ETag")
                 .maxAge(3600);
     }
 }

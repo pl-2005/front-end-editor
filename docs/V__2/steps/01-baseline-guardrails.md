@@ -1,6 +1,6 @@
 # 步骤 01：现状与并发、存储护栏
 
-> 前置：当前 V1 代码和已发布 Flyway V1/V2。状态：未开始。
+> 前置：当前 V1 代码和已发布 Flyway V1/V2。状态：已完成（2026-09-28）。
 
 ## 目标
 
@@ -23,3 +23,10 @@ V3 追加 `project.lock_version BIGINT NOT NULL DEFAULT 0`，不修改 V1/V2 迁
 确认项目元数据更新/删除的陈旧 ETag 返回 409、旧数据不受迁移破坏、`collab/` 不被旧清理器扫描、损坏或超限旧压缩对象安全失败。仅按需运行开发检查；运行应用时使用根 `.env` 的本机服务，不使用 Docker，不输出凭据。
 
 交付步骤 02/03/05 的稳定边界：项目锁版本、固定 `project → collab_document` 锁顺序、旧对象与协作对象的隔离规则。
+
+## 完成记录
+
+- 项目行新增 V3 `lock_version`，元数据更新与软删除使用单个强 ETag；缺少前置条件返回 428，过期或并发更新返回 409 `PROJECT_STATE_CONFLICT`。内容快照写入后的新 `stateVersion` 会同步回客户端。
+- 元数据更新不再修改入口文件。旧快照仍走 V1 revision 流程；旧对象读取和 GZIP 解压均有硬上限，旧清理器只处理 `projects/` 前缀并跳过其他命名空间。
+- Sandpack 输入经过运行时变换后，保存和另存副本会还原未编辑的源文件，避免派生的 charset 或 package 配置写回项目。
+- 验收：后端 Maven 测试 18 项通过（H2/Flyway V3）；前端 Vitest 25 项通过，TypeScript 检查和 Vite 生产打包通过。未运行 MySQL/MinIO 专用集成验证，步骤门禁不要求该项。

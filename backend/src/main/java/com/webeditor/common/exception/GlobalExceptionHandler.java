@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.webeditor.storage.StorageException;
 
 @RestControllerAdvice
@@ -89,6 +90,20 @@ public class GlobalExceptionHandler {
                                                     HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(409, "VERSION_CONFLICT",
                 exception.getMessage(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(ProjectStateConflictException.class)
+    ResponseEntity<ApiError> handleProjectStateConflict(ProjectStateConflictException exception,
+                                                         HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(409, "PROJECT_STATE_CONFLICT",
+                exception.getMessage(), request.getRequestURI()));
+    }
+
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    ResponseEntity<ApiError> handleOptimisticLock(ObjectOptimisticLockingFailureException exception,
+                                                  HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of(409, "PROJECT_STATE_CONFLICT",
+                "项目状态已被并发修改，请刷新后重试", request.getRequestURI()));
     }
 
     @ExceptionHandler(InvalidSnapshotException.class)

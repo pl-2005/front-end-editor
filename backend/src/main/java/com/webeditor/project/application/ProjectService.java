@@ -1,6 +1,7 @@
 package com.webeditor.project.application;
 
 import com.webeditor.common.exception.ResourceNotFoundException;
+import com.webeditor.common.exception.ProjectStateConflictException;
 import com.webeditor.project.domain.Project;
 import com.webeditor.project.repository.ProjectRepository;
 import com.webeditor.storage.SnapshotStorage;
@@ -62,21 +63,26 @@ public class ProjectService {
     }
 
     @Transactional
-    public ProjectResponses.Summary update(long id, ProjectRequests.Update request) {
+    public ProjectResponses.Summary update(long id, ProjectRequests.Update request, long expectedStateVersion) {
         Project project = requireActive(id);
+        requireStateVersion(project, expectedStateVersion);
         String template = defaultIfBlank(request.template(), project.getTemplate());
-        String entry = defaultIfBlank(request.entry(), project.getEntryFile());
-        validator.validatePath(entry);
-        project.update(request.name().trim(), normalizeDescription(request.description()),
-                template.trim(), entry);
+        project.updateMetadata(request.name().trim(), normalizeDescription(request.description()), template.trim());
         return ProjectResponses.Summary.from(projects.saveAndFlush(project));
     }
 
     @Transactional
-    public void delete(long id) {
+    public void delete(long id, long expectedStateVersion) {
         Project project = requireActive(id);
+        requireStateVersion(project, expectedStateVersion);
         project.delete();
-        projects.save(project);
+        projects.saveAndFlush(project);
+    }
+
+    private void requireStateVersion(Project project, long expected) {
+        if (project.getLockVersion() != expected) {
+            throw new ProjectStateConflictException("项目元数据已被修改，请刷新后重试");
+        }
     }
 
     @Transactional(readOnly = true)

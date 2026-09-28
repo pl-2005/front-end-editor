@@ -23,7 +23,8 @@ class OrphanSnapshotCleanerTests {
         var orphan = new SnapshotStorage.StoredObject("projects/1/revisions/orphan.json.gz", NOW.minus(Duration.ofDays(2)));
         var referenced = new SnapshotStorage.StoredObject("projects/1/revisions/kept.json.gz", NOW.minus(Duration.ofDays(2)));
         var recent = new SnapshotStorage.StoredObject("projects/1/revisions/recent.json.gz", NOW.minus(Duration.ofHours(1)));
-        when(storage.list("projects/")).thenReturn(List.of(orphan, referenced, recent));
+        var collab = new SnapshotStorage.StoredObject("collab/projects/1/epochs/1/doc.yjs", NOW.minus(Duration.ofDays(2)));
+        when(storage.list("projects/")).thenReturn(List.of(orphan, referenced, recent, collab));
         when(revisions.existsByObjectKey(orphan.key())).thenReturn(false);
         when(revisions.existsByObjectKey(referenced.key())).thenReturn(true);
 
@@ -33,5 +34,7 @@ class OrphanSnapshotCleanerTests {
         verify(storage).delete(orphan.key());
         verify(storage, never()).delete(referenced.key());
         verify(storage, never()).delete(recent.key());
+        verify(storage, never()).delete(collab.key());
+        verify(storage, never()).list("collab/");
     }
 }

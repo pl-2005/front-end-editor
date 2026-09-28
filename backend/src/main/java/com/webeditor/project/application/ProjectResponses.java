@@ -16,12 +16,13 @@ public final class ProjectResponses {
             String template,
             String entry,
             int version,
+            long stateVersion,
             Instant createdAt,
             Instant updatedAt
     ) {
         static Summary from(Project project) {
             return new Summary(project.getId(), project.getName(), project.getDescription(), project.getTemplate(),
-                    project.getEntryFile(), project.getCurrentVersion(), project.getCreatedAt(), project.getUpdatedAt());
+                    project.getEntryFile(), project.getCurrentVersion(), project.getLockVersion(), project.getCreatedAt(), project.getUpdatedAt());
         }
     }
 
@@ -32,13 +33,14 @@ public final class ProjectResponses {
             String template,
             String entry,
             int version,
+            long stateVersion,
             Map<String, SnapshotFile> files,
             Instant createdAt,
             Instant updatedAt
     ) {
         static Details from(Project project, Map<String, SnapshotFile> files) {
             return new Details(project.getId(), project.getName(), project.getDescription(), project.getTemplate(),
-                    project.getEntryFile(), project.getCurrentVersion(), files,
+                    project.getEntryFile(), project.getCurrentVersion(), project.getLockVersion(), files,
                     project.getCreatedAt(), project.getUpdatedAt());
         }
     }
@@ -46,7 +48,7 @@ public final class ProjectResponses {
     public record PageResult<T>(List<T> items, int page, int size, long totalElements, int totalPages) {
     }
 
-    public record SnapshotSaved(int version, String contentHash, Instant savedAt) {
+    public record SnapshotSaved(int version, long stateVersion, String contentHash, Instant savedAt) {
     }
 
     public record Revision(

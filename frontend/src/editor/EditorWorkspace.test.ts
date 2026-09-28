@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { prepareSandpackFiles } from './sandpackRuntime'
+import { prepareSandpackFiles, restoreUnchangedRuntimeFiles } from './sandpackRuntime'
 
 describe('prepareSandpackFiles', () => {
   it('adds an explicit UTF-8 charset to legacy HTML fragments', () => {
@@ -60,5 +60,29 @@ describe('prepareSandpackFiles', () => {
 
     expect(prepared['/index.js']?.code).toContain('import "./styles.css"')
     expect(prepared['/index.js']?.code).toContain('?.remove()')
+  })
+
+  it('does not persist unchanged runtime-only file transformations', () => {
+    const source = {
+      '/index.html': { code: '<h1>你好</h1>' },
+      '/package.json': { code: JSON.stringify({ dependencies: {}, main: '/index.js' }) },
+    }
+    const runtime = prepareSandpackFiles(source)
+
+    expect(restoreUnchangedRuntimeFiles(runtime, source)).toEqual(source)
+  })
+
+  it('preserves authored edits while restoring untouched runtime files', () => {
+    const source = {
+      '/index.html': { code: '<h1>你好</h1>' },
+      '/index.js': { code: 'console.log("source")' },
+    }
+    const runtime = prepareSandpackFiles(source)
+    const current = { ...runtime, '/index.js': { code: 'console.log("edited")' } }
+
+    expect(restoreUnchangedRuntimeFiles(current, source)).toEqual({
+      '/index.html': source['/index.html'],
+      '/index.js': { code: 'console.log("edited")' },
+    })
   })
 })

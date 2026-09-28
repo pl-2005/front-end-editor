@@ -62,6 +62,7 @@ const project = (id: number, name: string, version: number) => ({
   template: 'vanilla',
   entry: '/index.html',
   version,
+  stateVersion: 0,
   files: { '/index.html': { code: `<h1>${name}</h1>` } },
   createdAt: '2026-09-20T00:00:00Z',
   updatedAt: '2026-09-20T00:00:00Z',
@@ -134,7 +135,7 @@ describe('App project coordination', () => {
     await screen.findByText('项目 B', { selector: '.app-header strong' })
 
     await act(async () => {
-      saveResult.resolve(envelope({ version: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }))
+      saveResult.resolve(envelope({ version: 1, stateVersion: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }))
       await Promise.resolve()
     })
 
@@ -154,7 +155,7 @@ describe('App project coordination', () => {
       if (url.includes('?size=100')) return Promise.resolve(envelope({ items: [first], page: 0, size: 100, totalElements: 1, totalPages: 1 }))
       if (url === '/api/projects/1') return Promise.resolve(envelope(first))
       if (url === '/api/projects/1/snapshot' && init?.method === 'PUT') {
-        return Promise.resolve(envelope({ version: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }))
+        return Promise.resolve(envelope({ version: 1, stateVersion: 1, contentHash: 'hash', savedAt: '2026-09-20T00:00:00Z' }))
       }
       throw new Error(`Unexpected request: ${url}`)
     }))
@@ -246,7 +247,7 @@ describe('App project coordination', () => {
       const url = String(input)
       if (url.includes('?size=100')) return Promise.resolve(envelope({ items: [first], page: 0, size: 100, totalElements: 1, totalPages: 1 }))
       if (url === '/api/projects/1' && !init?.method) return Promise.resolve(envelope(first))
-      if (url === '/api/projects/1/snapshot' && init?.method === 'PUT') return Promise.resolve(envelope({ version: 1, contentHash: 'draft', savedAt: '2026-09-20T00:00:00Z' }))
+      if (url === '/api/projects/1/snapshot' && init?.method === 'PUT') return Promise.resolve(envelope({ version: 1, stateVersion: 1, contentHash: 'draft', savedAt: '2026-09-20T00:00:00Z' }))
       throw new Error(`Unexpected request: ${url}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -258,7 +259,7 @@ describe('App project coordination', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => {
       if (String(url) !== '/api/projects/1/snapshot' || init?.method !== 'PUT') return false
       const html = JSON.parse(String(init.body)).files['/index.html'].code as string
-      return html.includes('<meta charset="UTF-8">') && html.includes('<h1>本地草稿</h1>')
+      return html === '<h1>本地草稿</h1>'
     })).toBe(true))
   })
 
@@ -271,7 +272,7 @@ describe('App project coordination', () => {
       if (url.includes('?size=100')) return Promise.resolve(envelope({ items: [first, copySummary], page: 0, size: 100, totalElements: 2, totalPages: 1 }))
       if (url === '/api/projects/1/snapshot' && init?.method === 'PUT') return Promise.resolve(new Response(JSON.stringify({ message: '版本冲突', code: 'VERSION_CONFLICT' }), { status: 409, headers: { 'Content-Type': 'application/json' } }))
       if (url === '/api/projects' && init?.method === 'POST') return Promise.resolve(envelope(copySummary, 201))
-      if (url === '/api/projects/2/snapshot' && init?.method === 'PUT') return Promise.resolve(envelope({ version: 1, contentHash: 'copy', savedAt: '2026-09-20T00:00:00Z' }))
+      if (url === '/api/projects/2/snapshot' && init?.method === 'PUT') return Promise.resolve(envelope({ version: 1, stateVersion: 1, contentHash: 'copy', savedAt: '2026-09-20T00:00:00Z' }))
       if (url === '/api/projects/2') return Promise.resolve(envelope(copyDetails))
       if (url === '/api/projects/1') return Promise.resolve(envelope(first))
       throw new Error(`Unexpected request: ${url}`)
@@ -302,7 +303,7 @@ describe('App project coordination', () => {
       ]))
       if (url === '/api/projects/1/revisions/1/restore' && init?.method === 'POST') {
         expect(JSON.parse(String(init.body)).expectedVersion).toBe(2)
-        return Promise.resolve(envelope({ version: 3, contentHash: 'old', savedAt: '2026-09-20T03:00:00Z' }))
+        return Promise.resolve(envelope({ version: 3, stateVersion: 3, contentHash: 'old', savedAt: '2026-09-20T03:00:00Z' }))
       }
       if (url === '/api/projects/1') {
         detailLoads += 1

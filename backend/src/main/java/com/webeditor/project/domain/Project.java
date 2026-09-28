@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 
 @Entity
@@ -38,6 +39,10 @@ public class Project {
     @Column(nullable = false)
     private byte status;
 
+    @Version
+    @Column(name = "lock_version", nullable = false)
+    private long lockVersion;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -67,11 +72,10 @@ public class Project {
         updatedAt = Instant.now();
     }
 
-    public void update(String name, String description, String template, String entryFile) {
+    public void updateMetadata(String name, String description, String template) {
         this.name = name;
         this.description = description;
         this.template = template;
-        this.entryFile = entryFile;
     }
 
     public void pointToSnapshot(int version, String objectKey, String entryFile) {
@@ -92,6 +96,7 @@ public class Project {
     public int getCurrentVersion() { return currentVersion; }
     public String getCurrentObjectKey() { return currentObjectKey; }
     public byte getStatus() { return status; }
+    public long getLockVersion() { return lockVersion; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

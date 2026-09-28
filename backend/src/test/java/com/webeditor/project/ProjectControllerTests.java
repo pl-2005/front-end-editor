@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -65,19 +66,38 @@ class ProjectControllerTests {
 
         mockMvc.perform(put("/api/projects/{id}", id)
                         .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"缺少ETag\",\"description\":\"updated\",\"template\":\"vanilla\"}"))
+                .andExpect(status().isPreconditionRequired());
+
+        mockMvc.perform(put("/api/projects/{id}", id)
+                        .header("If-Match", etag(id, 0))
+                        .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"已重命名","description":"updated","template":"vanilla","entry":"/main.html"}
+                                {"name":"已重命名","description":"updated","template":"vanilla"}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("已重命名"))
-                .andExpect(jsonPath("$.data.entry").value("/main.html"));
+                .andExpect(jsonPath("$.data.entry").value("/index.html"))
+                .andExpect(jsonPath("$.data.stateVersion").value(1))
+                .andExpect(header().string("ETag", etag(id, 1)));
+
+        mockMvc.perform(put("/api/projects/{id}", id)
+                        .header("If-Match", etag(id, 0))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"陈旧更新\",\"description\":\"updated\",\"template\":\"vanilla\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PROJECT_STATE_CONFLICT"));
 
         mockMvc.perform(get("/api/projects?page=0&size=20"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.totalElements").value(1))
                 .andExpect(jsonPath("$.data.items[0].name").value("已重命名"));
 
-        mockMvc.perform(delete("/api/projects/{id}", id))
+        mockMvc.perform(delete("/api/projects/{id}", id).header("If-Match", etag(id, 0)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PROJECT_STATE_CONFLICT"));
+
+        mockMvc.perform(delete("/api/projects/{id}", id).header("If-Match", etag(id, 1)))
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/projects/{id}", id))
@@ -206,6 +226,10 @@ class ProjectControllerTests {
                 .andReturn();
         JsonNode json = objectMapper.readTree(result.getResponse().getContentAsByteArray());
         return json.path("data").path("id").asLong();
+    }
+
+    private String etag(long id, long version) {
+        return "\"project-" + id + "-" + version + "\"";
     }
 
     @TestConfiguration

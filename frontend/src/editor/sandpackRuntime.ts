@@ -59,3 +59,12 @@ export function prepareSandpackFiles(files: ProjectFiles): ProjectFiles {
 
   return changed ? runtimeFiles : files
 }
+
+export function restoreUnchangedRuntimeFiles(currentFiles: ProjectFiles, sourceFiles: ProjectFiles): ProjectFiles {
+  const preparedSourceFiles = prepareSandpackFiles(sourceFiles)
+  return Object.fromEntries(Object.entries(currentFiles).map(([path, currentFile]) => {
+    const sourceFile = sourceFiles[path]
+    const preparedFile = preparedSourceFiles[path]
+    return [path, sourceFile && preparedFile?.code === currentFile.code ? sourceFile : currentFile]
+  }))
+}

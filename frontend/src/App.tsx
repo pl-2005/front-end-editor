@@ -82,7 +82,7 @@ export default function App() {
   const handleDelete = async (project: ProjectSummary) => {
     if (!window.confirm(`确定删除项目“${project.name}”？`)) return
     try {
-      await deleteProject(project.id)
+      await deleteProject(project)
       const items = await refreshProjects()
       if (opened?.details.id === project.id) { setOpened(null); if (items[0]) await openProject(items[0].id) }
     } catch (cause) { setError(cause instanceof Error ? cause.message : '删除失败') }
@@ -110,11 +110,11 @@ export default function App() {
       {!loading && !opened ? <div className="empty-state"><span>W/</span><h1>创建第一个项目</h1><p>在浏览器里编写 HTML、CSS 和 JavaScript，并即时预览结果。</p><button type="button" onClick={() => void handleCreate()}>新建项目</button></div> : null}
       {!loading && opened ? <EditorWorkspace
         project={opened.details} files={opened.files} providerKey={opened.providerKey} recoveredDraft={opened.recoveredDraft} recoveryMessage={opened.recoveryMessage}
-        onVersionChange={(projectId, version) => {
+        onVersionChange={(projectId, version, stateVersion) => {
           setOpened((current) => current?.details.id === projectId
-            ? { ...current, recoveredDraft: false, recoveryMessage: undefined, details: { ...current.details, version } }
+            ? { ...current, recoveredDraft: false, recoveryMessage: undefined, details: { ...current.details, version, stateVersion } }
             : current)
-          setProjects((current) => current.map((item) => item.id === projectId ? { ...item, version } : item))
+          setProjects((current) => current.map((item) => item.id === projectId ? { ...item, version, stateVersion } : item))
         }}
         onReload={() => void openProject(opened.details.id)}
         onSaveCopy={async (name, entry, files) => {
@@ -125,7 +125,7 @@ export default function App() {
             await refreshProjects()
             await openProject(copy.id)
           } catch (cause) {
-            if (copy) await deleteProject(copy.id).catch(() => undefined)
+            if (copy) await deleteProject(copy).catch(() => undefined)
             setError(cause instanceof Error ? cause.message : '另存副本失败')
           }
         }}

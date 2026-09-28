@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class MinioSnapshotStorage implements SnapshotStorage {
+    private static final int MAX_COMPRESSED_BYTES = 12 * 1024 * 1024;
     private final MinioClient client;
     private final MinioProperties properties;
 
@@ -42,7 +43,18 @@ public class MinioSnapshotStorage implements SnapshotStorage {
                 .bucket(properties.bucket())
                 .object(objectKey)
                 .build())) {
-            return input.readAllBytes();
+            var output = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                total += count;
+                if (total > MAX_COMPRESSED_BYTES) throw new StorageException("Project snapshot exceeds size limit");
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
+        } catch (StorageException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new StorageException("Could not read project snapshot", exception);
         }

@@ -34,6 +34,9 @@ class InfrastructureContractTests {
             }
 
             assertThat(tableNames).contains("project", "project_revision", "flyway_schema_history");
+            try (var columns = connection.getMetaData().getColumns(null, null, "project", "lock_version")) {
+                assertThat(columns.next()).isTrue();
+            }
         }
     }
 
@@ -43,7 +46,8 @@ class InfrastructureContractTests {
                         .header("Origin", "http://localhost:5173")
                         .header("Access-Control-Request-Method", "GET"))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"));
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+                .andExpect(header().string("Access-Control-Expose-Headers", "ETag"));
     }
 
     @Test

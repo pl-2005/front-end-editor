@@ -10,7 +10,7 @@ interface Options {
   initialVersion: number
   entry: string
   files: ProjectFiles
-  onVersionChange: (projectId: number, version: number) => void
+  onVersionChange: (projectId: number, version: number, stateVersion: number) => void
   initiallyDirty?: boolean
 }
 
@@ -55,7 +55,7 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
           const result = await saveSnapshot(projectId, versionRef.current, latest.entry, latest.files)
           versionRef.current = result.version
           lastSavedRef.current = nextFingerprint
-          onVersionChange(projectId, result.version)
+          onVersionChange(projectId, result.version, result.stateVersion)
           if (fingerprint(latestRef.current.entry, latestRef.current.files) === nextFingerprint) {
             await deleteDraft(projectId)
             setStatus('saved')

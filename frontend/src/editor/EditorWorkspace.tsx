@@ -7,7 +7,7 @@ import { useProjectSave } from '../hooks/useProjectSave'
 import type { ProjectDetails, ProjectFiles } from '../types/project'
 import { ProjectFileTree } from './ProjectFileTree'
 import { RevisionHistory } from './RevisionHistory'
-import { prepareSandpackFiles } from './sandpackRuntime'
+import { prepareSandpackFiles, restoreUnchangedRuntimeFiles } from './sandpackRuntime'
 
 interface Props {
   project: ProjectDetails
@@ -15,7 +15,7 @@ interface Props {
   providerKey: string
   recoveredDraft?: boolean
   recoveryMessage?: string
-  onVersionChange: (projectId: number, version: number) => void
+  onVersionChange: (projectId: number, version: number, stateVersion: number) => void
   onReload: () => void
   onSaveCopy: (name: string, entry: string, files: ProjectFiles) => Promise<void>
 }
@@ -28,14 +28,17 @@ function toProjectFiles(files: SandpackFiles): ProjectFiles {
   return Object.fromEntries(Object.entries(files).map(([path, file]) => [path, { code: typeof file === 'string' ? file : file.code }]))
 }
 
-function WorkspaceContents({ project, recoveryMessage, recoveredDraft, onVersionChange, onReload, onSaveCopy }: Omit<Props, 'files' | 'providerKey'>) {
+function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recoveredDraft, onVersionChange, onReload, onSaveCopy }: Omit<Props, 'providerKey'>) {
   const { sandpack } = useSandpack()
   const workspaceRef = useRef<HTMLElement>(null)
   const resizeStartRef = useRef<{ pointerY: number; height: number } | null>(null)
   const [consoleHeight, setConsoleHeight] = useState(DEFAULT_CONSOLE_HEIGHT)
   const [isConsoleOpen, setIsConsoleOpen] = useState(true)
   const [isResizingConsole, setIsResizingConsole] = useState(false)
-  const files = useMemo(() => toProjectFiles(sandpack.files), [sandpack.files])
+  const files = useMemo(
+    () => restoreUnchangedRuntimeFiles(toProjectFiles(sandpack.files), sourceFiles),
+    [sandpack.files, sourceFiles],
+  )
   const { status, message, save } = useProjectSave({ projectId: project.id, initialVersion: project.version, entry: project.entry, files, onVersionChange, initiallyDirty: recoveredDraft })
 
   const createFile = useCallback((path: string) => {
@@ -63,8 +66,9 @@ function WorkspaceContents({ project, recoveryMessage, recoveredDraft, onVersion
 
   const saveCopy = useCallback(async () => {
     const name = window.prompt('副本项目名称', `${project.name} 副本`)?.trim()
-    if (name) await onSaveCopy(name, project.entry, toProjectFiles(sandpack.files))
-  }, [onSaveCopy, project.entry, project.name, sandpack.files])
+    if (name) await onSaveCopy(name, project.entry,
+      restoreUnchangedRuntimeFiles(toProjectFiles(sandpack.files), sourceFiles))
+  }, [onSaveCopy, project.entry, project.name, sandpack.files, sourceFiles])
 
   useEffect(() => {
     if (!isResizingConsole) return
@@ -144,6 +148,6 @@ export function EditorWorkspace({ project, files, providerKey, recoveryMessage, 
     options={{ activeFile: project.entry, visibleFiles: Object.keys(files), autorun: true, recompileMode: 'delayed', recompileDelay: 300 }}
     theme="dark"
   >
-    <WorkspaceContents project={project} recoveryMessage={recoveryMessage} recoveredDraft={recoveredDraft} onVersionChange={onVersionChange} onReload={onReload} onSaveCopy={onSaveCopy} />
+    <WorkspaceContents project={project} files={files} recoveryMessage={recoveryMessage} recoveredDraft={recoveredDraft} onVersionChange={onVersionChange} onReload={onReload} onSaveCopy={onSaveCopy} />
   </SandpackProvider>
 }
