@@ -71,20 +71,9 @@ CREATE TABLE app_user (
       (email IS NOT NULL AND normalized_email IS NOT NULL)
     )
 );
-
-CREATE TABLE auth_cutover_state (
-    singleton_id TINYINT NOT NULL,
-    auth_required_cutover BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at DATETIME(6) NOT NULL,
-    PRIMARY KEY (singleton_id),
-    CONSTRAINT chk_auth_cutover_singleton CHECK (singleton_id = 1)
-);
-
-INSERT INTO auth_cutover_state(singleton_id, auth_required_cutover, updated_at)
-VALUES (1, FALSE, CURRENT_TIMESTAMP(6));
 ```
 
-V4 是 MySQL 生产迁移；当前 H2 快速测试不执行 MySQL Flyway 脚本，改用与实体等价的 test schema/仓储单测。功能验收确认迁移后可注册、登录并按规范化值处理唯一约束，不将本机 MySQL 集成测试设为门禁。
+V4 只创建新账号表；旧入口没有身份数据，不迁移旧账号或会话，也不创建认证切换状态表。V4 是 MySQL 生产迁移；当前 H2 快速测试不执行 MySQL Flyway 脚本，改用与实体等价的 test schema/仓储单测。功能验收确认迁移后可注册、登录并按规范化值处理唯一约束，不将本机 MySQL 集成测试设为门禁。
 
 规范化顺序固定为：trim、Unicode NFKC、`Locale.ROOT` 小写、规范化后长度校验。规范化列在 V4 DDL 显式使用 `utf8mb4_0900_bin`，运行环境要求 MySQL 8。用户名禁止包含 `@`；login 含 `@` 时只查邮箱，否则只查用户名，从语法上消除跨字段身份歧义。应用产生规范化值，唯一索引负责并发兜底，用户不硬删除。
 
@@ -195,7 +184,7 @@ Filter 层直接生成现有 `ApiError`：缺失、过期、签名/声明错误�
 - client 支持 JSON、204、非 JSON 错误、`AbortSignal`，且不记录密码、访问 JWT 或刷新凭据。
 - projects API 迁移到统一 client，并保留步骤 01 的 ETag 行为。
 
-步骤 02 不单独面向用户发布。`AUTH_ENFORCEMENT_ENABLED` 默认 `false`；切换前旧 V1 入口按原行为运行，新身份端点仅供受控功能检查。只有步骤 01–10 的身份、团队、新项目 Y.Doc、协作、删除和撤权功能全部就绪，步骤 11 才在停写窗口启用完整 Bearer 认证与新 UI，并以独立数据库事务设置 `auth_cutover_state.auth_required_cutover=true`。此后配置缺失或 false 必须拒绝启动/保持 readiness 503，回滚制品也必须强制认证并拒绝匿名项目及旧版本入口。切换前后的 SecurityFilterChain 请求矩阵均需核对。
+步骤 02 不单独面向用户发布。步骤 01–10 在开发或隔离环境完成功能检查，生产 V1 入口继续按原行为运行。V2 制品从启动起对业务 API 强制 Bearer 认证，不提供关闭认证的配置开关。只有身份、团队、新项目 Y.Doc、协作、删除和撤权功能全部就绪，步骤 11 才在停写窗口部署完整 V2，并在受控检查通过后切换外部入口。入口切换前不向生产用户暴露 V2；切换后只允许回滚到同样强制认证且兼容全部已执行迁移的制品。V2 的 SecurityFilterChain 请求矩阵必须覆盖匿名入口、受保护 API 和旧 V1 路径拒绝规则。
 
 ## 10. 错误码
 
@@ -212,7 +201,7 @@ Filter 层直接生成现有 `ApiError`：缺失、过期、签名/声明错误�
 
 ## 11. 测试与验证
 
-后端快速测试覆盖：登录/注册/me 的安全 DTO、429 的整数 Retry-After、密码哈希及多字节 72-byte 边界、确定性规范化、用户名 `@` 拒绝与登录列选择、并发唯一冲突、开放注册拒绝特权字段、空用户库 readiness、JWT 签名/算法/kid/iss/aud/期限校验、`JwtAuthenticationFilter` 的 Bearer 解析/重复头拒绝、MySQL 用户存在性及 `token_version` 核对、构造 `Authentication`/设置与清理 `SecurityContext`、Controller 读取 `CurrentUser`、资源 ACL 实时查询、无重复 Bearer Filter、Redis 刷新凭据原子轮换/重放/上限/绝对期限、改密与退出所有设备、无 Cookie/无容器 Session、Redis 故障下旧 JWT 的数据库核对、429/401 分流、Filter 顺序和 JSON 错误、AUTH_ENFORCEMENT_ENABLED 两态请求矩阵、历史匿名项目不可见边界，以及步骤 01 回归。
+后端快速测试覆盖：登录/注册/me 的安全 DTO、429 的整数 Retry-After、密码哈希及多字节 72-byte 边界、确定性规范化、用户名 `@` 拒绝与登录列选择、并发唯一冲突、开放注册拒绝特权字段、空用户库 readiness、JWT 签名/算法/kid/iss/aud/期限校验、`JwtAuthenticationFilter` 的 Bearer 解析/重复头拒绝、MySQL 用户存在性及 `token_version` 核对、构造 `Authentication`/设置与清理 `SecurityContext`、Controller 读取 `CurrentUser`、资源 ACL 实时查询、无重复 Bearer Filter、Redis 刷新凭据原子轮换/重放/上限/绝对期限、改密与退出所有设备、无 Cookie/无容器 Session、Redis 故障下旧 JWT 的数据库核对、429/401 分流、Filter 顺序和 JSON 错误、V2 匿名及受保护请求矩阵、旧 V1 路径拒绝规则、历史匿名项目不可见边界，以及步骤 01 回归。
 
 功能验收覆盖注册与登录、JWT Bearer 请求、刷新凭据轮换与过期、退出所有设备和改密后的旧凭据失效、错误响应及限流。需要运行应用时按仓库根 `.env` 连接本机服务，不创建专用集成测试 schema 或 Redis 命名空间作为验收前提。
 
@@ -234,10 +223,10 @@ mvn test
 
 - V4/V5 可由 V3 无损升级；密码、JWT 私钥和刷新凭据不泄露。
 - JWT 无 Cookie，访问凭据短期有效；刷新凭据单次轮换、空闲/绝对过期、退出所有设备、改密、429 限流和 `token_version` 行为正确。
-- 强制认证开启后匿名用户不能访问项目，登录用户只能访问所属团队授权的项目；历史匿名项目按步骤 03 的隔离规则保持不可访问。
+- V2 匿名用户不能访问项目，登录用户只能访问所属团队授权的项目；历史匿名项目按步骤 03 的隔离规则保持不可访问。
 - Filter 错误为统一 JSON，前端 client 可完整处理 Bearer 认证与刷新失败。
 - 注册、登录、刷新、退出和改密的功能验收通过。
-- 步骤 11 在完整 V2 制品就绪后，先停止旧写流量并执行全部迁移，再原子切换登录壳、API 和网关入口。认证切换前可继续保留 V1 入口；切换后回滚仍强制认证并 fail closed，旧 V1 前端不得连接新后端。
+- 步骤 11 在完整 V2 制品就绪后，先停止旧写流量并执行全部迁移，再切换登录壳、API 和网关外部入口。V2 服务从启动起强制认证；切换后仅可使用强制认证且兼容迁移的回滚制品，旧 V1 前端不得连接新后端。
 - Flyway 不回滚；兼容回滚制品需认识最终已执行的全部迁移、当前 JWT 签名密钥/`kid` 与 Redis 刷新凭据格式，并默认拒绝匿名。刷新凭据按 TTL 过期。
 
 ## 13. 向后续步骤交付

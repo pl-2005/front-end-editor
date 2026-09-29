@@ -36,4 +36,4 @@
 
 ## 版本主线
 
-`V3` 项目锁版本 → `V4/V5` 身份与 JWT 撤销水位（刷新凭据存 Redis）→ `V6/V7` 团队成员关系与旧匿名项目隔离 → 后续追加 `collab_document`、票据/nonce、operation/outbox 迁移。认证切换是步骤 11 的独立数据库事务，不是提前执行的 Flyway 脚本；不再添加 revision 迁移。
+`V3` 项目锁版本 → `V4/V5` 身份与 JWT 撤销水位（刷新凭据存 Redis）→ `V6/V7` 团队成员关系与旧匿名项目隔离 → 后续追加 `collab_document`、票据/nonce、operation/outbox 迁移。V2 制品始终强制认证；步骤 11 通过切换外部入口发布，不创建数据库认证切换状态，也不再添加 revision 迁移。
