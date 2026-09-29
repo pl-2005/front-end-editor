@@ -36,6 +36,10 @@ public class Project {
     @Column(name = "current_object_key", length = 500)
     private String currentObjectKey;
 
+    @Column(name = "team_id") private Long teamId;
+    @Column(name = "created_by") private Long createdBy;
+    @Column(name = "legacy_unowned", nullable = false) private boolean legacyUnowned;
+
     @Column(nullable = false)
     private byte status;
 
@@ -89,6 +93,9 @@ public class Project {
     }
 
     public Long getId() { return id; }
+    public Long getTeamId() { return teamId; }
+    public Long getCreatedBy() { return createdBy; }
+    public boolean isLegacyUnowned() { return legacyUnowned; }
     public String getName() { return name; }
     public String getDescription() { return description; }
     public String getTemplate() { return template; }

@@ -20,12 +20,19 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.webeditor.storage.StorageException;
 import com.webeditor.identity.application.AuthFailure;
+import com.webeditor.team.application.TeamFailure;
 import com.webeditor.identity.application.AuthRateLimiter;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(TeamFailure.class)
+    ResponseEntity<ApiError> handleTeamFailure(TeamFailure exception, HttpServletRequest request) {
+        return ResponseEntity.status(exception.status()).body(ApiError.of(exception.status(), exception.code(),
+                exception.getMessage(), request.getRequestURI()));
+    }
 
     @ExceptionHandler(RedisConnectionFailureException.class)
     ResponseEntity<ApiError> handleRedisFailure(HttpServletRequest request) {

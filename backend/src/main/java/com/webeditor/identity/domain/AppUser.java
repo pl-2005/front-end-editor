@@ -41,4 +41,5 @@ public class AppUser {
     public String getDisplayName() { return displayName; }
     public String getAvatarColor() { return avatarColor; }
     public long getTokenVersion() { return tokenVersion; }
+    public long getAuthzVersion() { return authzVersion; }
 }

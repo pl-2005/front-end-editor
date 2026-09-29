@@ -20,7 +20,7 @@ public final class ProjectResponses {
             Instant createdAt,
             Instant updatedAt
     ) {
-        static Summary from(Project project) {
+        public static Summary from(Project project) {
             return new Summary(project.getId(), project.getName(), project.getDescription(), project.getTemplate(),
                     project.getEntryFile(), project.getCurrentVersion(), project.getLockVersion(), project.getCreatedAt(), project.getUpdatedAt());
         }
