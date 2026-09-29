@@ -19,10 +19,36 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.webeditor.storage.StorageException;
+import com.webeditor.identity.application.AuthFailure;
+import com.webeditor.identity.application.AuthRateLimiter;
+import org.springframework.data.redis.RedisConnectionFailureException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(RedisConnectionFailureException.class)
+    ResponseEntity<ApiError> handleRedisFailure(HttpServletRequest request) {
+        return ResponseEntity.status(503).body(ApiError.of(503, "AUTH_SERVICE_UNAVAILABLE",
+                "认证服务暂时不可用", request.getRequestURI()));
+    }
+
+    @ExceptionHandler(AuthRateLimiter.Limited.class)
+    ResponseEntity<ApiError> handleRateLimit(AuthRateLimiter.Limited exception, HttpServletRequest request) {
+        return ResponseEntity.status(429).header("Retry-After", Long.toString(exception.retryAfter()))
+                .body(ApiError.of(429, "AUTH_RATE_LIMITED", "请求过于频繁", request.getRequestURI()));
+    }
+
+    @ExceptionHandler(AuthFailure.class)
+    ResponseEntity<ApiError> handleAuthFailure(AuthFailure exception, HttpServletRequest request) {
+        return ResponseEntity.status(exception.status()).body(ApiError.of(exception.status(), exception.code(),
+                exception.status() == 401 ? "需要登录" : "请求冲突", request.getRequestURI()));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<ApiError> handleInvalidInput(IllegalArgumentException exception, HttpServletRequest request) {
+        return ResponseEntity.badRequest().body(ApiError.of(400, "VALIDATION_FAILED", exception.getMessage(), request.getRequestURI()));
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {

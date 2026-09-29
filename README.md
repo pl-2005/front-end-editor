@@ -2,6 +2,8 @@
 
 一个面向 HTML、CSS 和 JavaScript 的浏览器在线编辑器。编辑与预览由 React、Vite 和 Sandpack 在浏览器中完成；Spring Boot 提供项目和版本管理 API，MySQL 保存元数据，MinIO 保存不可变的压缩文件快照。
 
+> V2 身份认证已进入开发阶段。当前代码强制 Bearer 认证并隔离 V1 匿名项目，团队授权与新项目流程将在后续步骤接入；本页其余项目/版本说明记录的是 V1 功能，不代表当前 V2 代码已可公开切换。V2 实施顺序见 [docs/V__2/README.md](docs/V__2/README.md)。
+
 ## 已实现功能
 
 - 项目：新建、打开、重命名和软删除；
@@ -126,11 +128,15 @@ Sandpack 在浏览器中编译和运行用户代码，后端不会执行项目�
 | `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 凭据 |
 | `MINIO_BUCKET` | 保存快照的私有 Bucket |
 | `MINIO_INITIALIZE_BUCKET` | 启动时是否自动创建 Bucket |
-| `CORS_ALLOWED_ORIGINS` | 允许访问后端的前端来源 |
+| `SPRING_DATA_REDIS_HOST` / `SPRING_DATA_REDIS_PORT` | 本机 Redis 连接 |
+| `AUTH_REDIS_NAMESPACE` | 刷新凭据与登录节流键前缀 |
+| `JWT_SECRET` | JWT 的 HS256 签名密钥，至少 32 字节随机内容 |
 | `ORPHAN_CLEANUP_CRON` | 孤立快照定时清理表达式 |
 | `ORPHAN_CLEANUP_GRACE_PERIOD` | 孤立快照清理保护期 |
 
 完整配置和生产部署建议见 [docs/deployment.md](docs/deployment.md)。接口请求、响应和限制见 [docs/api.md](docs/api.md)。
+
+V2 本地启动时需在根 `.env` 中配置 `JWT_SECRET`，可用 PowerShell 生成随机值：`[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`。不要提交实际密钥。浏览器通过 Vite `/api` 代理同源请求；后端不开放浏览器跨源 CORS。
 
 ## 当前限制
 

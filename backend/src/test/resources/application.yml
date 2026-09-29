@@ -1,4 +1,11 @@
 spring:
+  profiles:
+    active: test
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  flyway:
+    target: '3'
   datasource:
     url: jdbc:h2:mem:web_editor;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
     username: sa
@@ -6,11 +13,18 @@ spring:
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
 
 editor:
-  cors:
-    allowed-origins: http://localhost:5173
+  auth:
+    issuer: web-editor
+    audience: web-editor-api
+    access-ttl: 10m
+    secret: test-only-hs256-secret-with-at-least-32-bytes
+    refresh-idle-timeout: 30m
+    refresh-max-lifetime: 12h
+    max-refresh-families-per-user: 5
+    redis-namespace: web-editor:test-auth
   storage:
     minio:
       endpoint: http://localhost:9000

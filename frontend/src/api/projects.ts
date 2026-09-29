@@ -1,18 +1,6 @@
-import type { ApiEnvelope, ApiErrorBody, PageResult, ProjectDetails, ProjectFiles, ProjectRevision, ProjectSummary, SnapshotSaved } from '../types/project'
-
-export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) { super(message) }
-}
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
-    throw new ApiError(body.message ?? `请求失败（${response.status}）`, response.status, body.code)
-  }
-  if (response.status === 204) return undefined as T
-  return ((await response.json()) as ApiEnvelope<T>).data
-}
+import type { PageResult, ProjectDetails, ProjectFiles, ProjectRevision, ProjectSummary, SnapshotSaved } from '../types/project'
+import { request } from './client'
+export { ApiError } from './client'
 
 export const listProjects = () => request<PageResult<ProjectSummary>>('/api/projects?size=100')
 export const getProject = (id: number) => request<ProjectDetails>(`/api/projects/${id}`)

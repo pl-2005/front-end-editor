@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import App from './App'
+import App, { WorkspaceApp } from './App'
+import { clearAuth, setCredentials } from './api/auth'
 import { putDraft } from './persistence/drafts'
 
 vi.mock('@codesandbox/sandpack-react', async () => {
@@ -55,6 +56,23 @@ vi.mock('@codesandbox/sandpack-react', async () => {
   }
 })
 
+describe('V2 login landing', () => {
+  afterEach(() => { clearAuth(); vi.unstubAllGlobals() })
+
+  it('does not request legacy projects after login', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    setCredentials({ user: { id: 1, username: 'tester', email: null, displayName: 'Tester', avatarColor: '#6366F1' },
+      accessToken: 'test-access-token', refreshToken: 'test-refresh-token', expiresIn: 600 })
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: '账号已就绪' })).toBeTruthy()
+    expect(screen.getByText('团队与项目功能仍在开发中，当前暂不能创建或打开项目。')).toBeTruthy()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 const project = (id: number, name: string, version: number) => ({
   id,
   name,
@@ -82,9 +100,12 @@ function deferred<T>() {
 describe('App project coordination', () => {
   beforeEach(() => {
     vi.stubGlobal('indexedDB', new IDBFactory())
+    setCredentials({ user: { id: 1, username: 'tester', email: null, displayName: 'Tester', avatarColor: '#6366F1' },
+      accessToken: 'test-access-token', refreshToken: 'test-refresh-token', expiresIn: 600 })
   })
 
   afterEach(() => {
+    clearAuth()
     vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -99,7 +120,7 @@ describe('App project coordination', () => {
       throw new Error(`Unexpected request: ${url}`)
     }))
 
-    render(<App />)
+    render(<WorkspaceApp />)
 
     const provider = await screen.findByTestId('sandpack-provider')
     expect(provider.getAttribute('data-template')).toBe('vite')
@@ -122,7 +143,7 @@ describe('App project coordination', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<App />)
+    render(<WorkspaceApp />)
     await screen.findByText('项目 A', { selector: '.app-header strong' })
 
     vi.useFakeTimers()
@@ -160,7 +181,7 @@ describe('App project coordination', () => {
       throw new Error(`Unexpected request: ${url}`)
     }))
 
-    render(<App />)
+    render(<WorkspaceApp />)
     await screen.findByText('项目 A', { selector: '.app-header strong' })
 
     fireEvent.click(screen.getByRole('button', { name: 'styles.css' }))
@@ -181,7 +202,7 @@ describe('App project coordination', () => {
       throw new Error(`Unexpected request: ${url}`)
     }))
 
-    const { container } = render(<App />)
+    const { container } = render(<WorkspaceApp />)
     await screen.findByText('项目 A', { selector: '.app-header strong' })
 
     const workspace = container.querySelector<HTMLElement>('.workspace')
@@ -218,7 +239,7 @@ describe('App project coordination', () => {
       throw new Error(`Unexpected request: ${url}`)
     }))
 
-    render(<App />)
+    render(<WorkspaceApp />)
     await screen.findByText('项目 A', { selector: '.app-header strong' })
 
     fireEvent.click(screen.getByRole('button', { name: /项目 B/ }))
@@ -252,7 +273,7 @@ describe('App project coordination', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    render(<App />)
+    render(<WorkspaceApp />)
     await screen.findByText('已恢复本地草稿')
     fireEvent.keyDown(window, { key: 's', ctrlKey: true })
 
@@ -280,7 +301,7 @@ describe('App project coordination', () => {
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(window, 'prompt').mockReturnValue('项目 A 副本')
 
-    render(<App />)
+    render(<WorkspaceApp />)
     await screen.findByText('项目 A', { selector: '.app-header strong' })
     fireEvent.click(screen.getByRole('button', { name: /^编辑当前文件/ }))
     fireEvent.keyDown(window, { key: 's', ctrlKey: true })
@@ -314,7 +335,7 @@ describe('App project coordination', () => {
     vi.stubGlobal('fetch', fetchMock)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
 
-    render(<App />)
+    render(<WorkspaceApp />)
     await screen.findByText('版本 2')
     fireEvent.click(screen.getByRole('button', { name: '版本历史' }))
     fireEvent.click(await screen.findByRole('button', { name: '恢复' }))

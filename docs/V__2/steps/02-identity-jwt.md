@@ -108,16 +108,14 @@ Redis 只保存刷新凭据摘要、轮换状态和登录节流计数。连接�
 JWT_ISSUER=web-editor
 JWT_AUDIENCE=web-editor-api
 JWT_ACCESS_TTL=10m
-JWT_SIGNING_KID=<configured-key-id>
-JWT_PRIVATE_KEY_FILE=<private-key-path>
-JWT_PUBLIC_KEY_SET_FILE=<public-key-set-path>
+JWT_SECRET=<random-secret-at-least-32-bytes>
 AUTH_REFRESH_IDLE_TIMEOUT=30m
 AUTH_REFRESH_MAX_LIFETIME=12h
 AUTH_MAX_REFRESH_FAMILIES_PER_USER=5
 AUTH_REDIS_NAMESPACE=web-editor:auth
 ```
 
-API 访问凭据是非对称签名的短期 JWT，浏览器通过 `Authorization: Bearer <accessToken>` 发送。生产仅通过 HTTPS 传输。`JwtAuthenticationFilter` 调用 Spring Security 的 JWT 解码器，只接受明确允许的签名算法和 `kid`，验证签名、`iss`、`aud`、`sub`、`jti`、`iat`、`nbf`、`exp` 与时钟偏差；密钥路径从根 `.env` 或生产密钥管理注入，私钥不进入日志或仓库。JWT 只含稳定 user ID、`token_version` 和必要标准声明，不含密码、邮箱、团队/项目角色或源码。过滤器每次从 MySQL 确认用户存在且 `token_version` 一致；资源 ACL 在服务层按当前数据库状态查询，JWT 声明不是授权事实源。
+API 访问凭据是 HS256 签名的短期 JWT，浏览器通过 `Authorization: Bearer <accessToken>` 发送。生产仅通过 HTTPS 传输。`JwtAuthenticationFilter` 调用 Spring Security 的 JWT 解码器，只接受 HS256，验证签名、`iss`、`aud`、`sub`、`jti`、`iat`、`nbf`、`exp` 与时钟偏差；至少 32 字节随机的 `JWT_SECRET` 从根 `.env` 或生产密钥管理注入，不进入日志或仓库。签发和校验使用同一个密钥；轮换密钥会使旧访问 JWT 失效。JWT 只含稳定 user ID、`token_version` 和必要标准声明，不含密码、邮箱、团队/项目角色或源码。过滤器每次从 MySQL 确认用户存在且 `token_version` 一致；资源 ACL 在服务层按当前数据库状态查询，JWT 声明不是授权事实源。
 
 登录成功另签发至少 256-bit 随机刷新凭据；Redis 只保存摘要、user ID、`token_version`、family ID、空闲/绝对期限与轮换状态。`POST /api/auth/refresh` 原子消费旧凭据并返回新的 JWT 和刷新凭据；已消费摘要的标记保留至 family 绝对期限，重放旧凭据时使该 family 失效。轮换不得延长首次签发时的绝对期限。超过每用户 family 上限时淘汰最旧 family。刷新时重新确认 MySQL 用户存在且 `token_version` 一致。Redis 丢失只导致刷新失效和重新登录，不恢复旧凭据。
 
@@ -201,7 +199,7 @@ Filter 层直接生成现有 `ApiError`：缺失、过期、签名/声明错误�
 
 ## 11. 测试与验证
 
-后端快速测试覆盖：登录/注册/me 的安全 DTO、429 的整数 Retry-After、密码哈希及多字节 72-byte 边界、确定性规范化、用户名 `@` 拒绝与登录列选择、并发唯一冲突、开放注册拒绝特权字段、空用户库 readiness、JWT 签名/算法/kid/iss/aud/期限校验、`JwtAuthenticationFilter` 的 Bearer 解析/重复头拒绝、MySQL 用户存在性及 `token_version` 核对、构造 `Authentication`/设置与清理 `SecurityContext`、Controller 读取 `CurrentUser`、资源 ACL 实时查询、无重复 Bearer Filter、Redis 刷新凭据原子轮换/重放/上限/绝对期限、改密与退出所有设备、无 Cookie/无容器 Session、Redis 故障下旧 JWT 的数据库核对、429/401 分流、Filter 顺序和 JSON 错误、V2 匿名及受保护请求矩阵、旧 V1 路径拒绝规则、历史匿名项目不可见边界，以及步骤 01 回归。
+后端快速测试覆盖：登录/注册/me 的安全 DTO、429 的整数 Retry-After、密码哈希及多字节 72-byte 边界、确定性规范化、用户名 `@` 拒绝与登录列选择、并发唯一冲突、开放注册拒绝特权字段、空用户库 readiness、JWT 签名/HS256 算法/iss/aud/期限校验、`JwtAuthenticationFilter` 的 Bearer 解析/重复头拒绝、MySQL 用户存在性及 `token_version` 核对、构造 `Authentication`/设置与清理 `SecurityContext`、Controller 读取 `CurrentUser`、资源 ACL 实时查询、无重复 Bearer Filter、Redis 刷新凭据原子轮换/重放/上限/绝对期限、改密与退出所有设备、无 Cookie/无容器 Session、Redis 故障下旧 JWT 的数据库核对、429/401 分流、Filter 顺序和 JSON 错误、V2 匿名及受保护请求矩阵、旧 V1 路径拒绝规则、历史匿名项目不可见边界，以及步骤 01 回归。
 
 功能验收覆盖注册与登录、JWT Bearer 请求、刷新凭据轮换与过期、退出所有设备和改密后的旧凭据失效、错误响应及限流。需要运行应用时按仓库根 `.env` 连接本机服务，不创建专用集成测试 schema 或 Redis 命名空间作为验收前提。
 
@@ -221,13 +219,13 @@ mvn test
 
 ## 12. 验收、发布与回滚
 
-- V4/V5 可由 V3 无损升级；密码、JWT 私钥和刷新凭据不泄露。
+- V4/V5 可由 V3 无损升级；密码、JWT 签名密钥和刷新凭据不泄露。
 - JWT 无 Cookie，访问凭据短期有效；刷新凭据单次轮换、空闲/绝对过期、退出所有设备、改密、429 限流和 `token_version` 行为正确。
 - V2 匿名用户不能访问项目，登录用户只能访问所属团队授权的项目；历史匿名项目按步骤 03 的隔离规则保持不可访问。
 - Filter 错误为统一 JSON，前端 client 可完整处理 Bearer 认证与刷新失败。
 - 注册、登录、刷新、退出和改密的功能验收通过。
 - 步骤 11 在完整 V2 制品就绪后，先停止旧写流量并执行全部迁移，再切换登录壳、API 和网关外部入口。V2 服务从启动起强制认证；切换后仅可使用强制认证且兼容迁移的回滚制品，旧 V1 前端不得连接新后端。
-- Flyway 不回滚；兼容回滚制品需认识最终已执行的全部迁移、当前 JWT 签名密钥/`kid` 与 Redis 刷新凭据格式，并默认拒绝匿名。刷新凭据按 TTL 过期。
+- Flyway 不回滚；兼容回滚制品需认识最终已执行的全部迁移、当前 JWT 签名密钥与 Redis 刷新凭据格式，并默认拒绝匿名。刷新凭据按 TTL 过期。
 
 ## 13. 向后续步骤交付
 

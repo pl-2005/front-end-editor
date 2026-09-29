@@ -1,6 +1,17 @@
 spring:
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
   application:
     name: web-editor-backend
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      username: ${SPRING_DATA_REDIS_USERNAME:}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      ssl:
+        enabled: ${SPRING_DATA_REDIS_SSL_ENABLED:false}
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/web_editor?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
     username: ${DB_USERNAME:web_editor}
@@ -13,8 +24,15 @@ spring:
     enabled: true
 
 editor:
-  cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  auth:
+    issuer: ${JWT_ISSUER:web-editor}
+    audience: ${JWT_AUDIENCE:web-editor-api}
+    access-ttl: ${JWT_ACCESS_TTL:10m}
+    secret: ${JWT_SECRET}
+    refresh-idle-timeout: ${AUTH_REFRESH_IDLE_TIMEOUT:30m}
+    refresh-max-lifetime: ${AUTH_REFRESH_MAX_LIFETIME:12h}
+    max-refresh-families-per-user: ${AUTH_MAX_REFRESH_FAMILIES_PER_USER:5}
+    redis-namespace: ${AUTH_REDIS_NAMESPACE:web-editor:auth}
   storage:
     minio:
       endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

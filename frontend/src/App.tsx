@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { getAuthUser, login, logout, register, subscribeAuth } from './api/auth'
 import { createProject, deleteProject, getProject, listProjects, saveSnapshot, updateProject } from './api/projects'
 import { DEFAULT_FILES } from './editor/defaultFiles'
 import { EditorWorkspace } from './editor/EditorWorkspace'
@@ -21,7 +22,7 @@ async function loadOpenProject(id: number): Promise<OpenProject> {
   }
 }
 
-export default function App() {
+export function WorkspaceApp() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [opened, setOpened] = useState<OpenProject | null>(null)
   const [loading, setLoading] = useState(true)
@@ -130,6 +131,44 @@ export default function App() {
           }
         }}
       /> : null}
+    </section>
+  </main>
+}
+
+export default function App() {
+  const user = useSyncExternalStore(subscribeAuth, getAuthUser)
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!user) return <main className="auth-shell"><form onSubmit={(event) => {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    setBusy(true); setError('')
+    const name = String(form.get('login') ?? '')
+    const password = String(form.get('password') ?? '')
+    const task = mode === 'register'
+      ? register(name, String(form.get('email') ?? ''), password).then(() => login(name, password))
+      : login(name, password)
+    void task.catch((cause) => setError(cause instanceof Error ? cause.message : '认证失败')).finally(() => setBusy(false))
+  }}>
+    <h1>Web Editor</h1>
+    <h2>{mode === 'login' ? '登录' : '注册账号'}</h2>
+    <label>用户名或邮箱<input name="login" required autoComplete="username" /></label>
+    {mode === 'register' ? <label>邮箱（可选）<input name="email" type="email" autoComplete="email" /></label> : null}
+    <label>密码<input name="password" type="password" required minLength={10} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
+    {error ? <p role="alert">{error}</p> : null}
+    <button type="submit" disabled={busy}>{busy ? '请稍候…' : mode === 'login' ? '登录' : '注册并登录'}</button>
+    <button type="button" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError('') }}>
+      {mode === 'login' ? '创建账号' : '返回登录'}
+    </button>
+  </form></main>
+  return <main className="auth-shell">
+    <section className="auth-status" aria-labelledby="auth-status-title">
+      <div className="brand"><span>W/</span> WEB EDITOR</div>
+      <p className="auth-status-label">已登录 · {user.displayName}</p>
+      <h1 id="auth-status-title">账号已就绪</h1>
+      <p>团队与项目功能仍在开发中，当前暂不能创建或打开项目。</p>
+      <button type="button" onClick={() => void logout()}>退出所有设备</button>
     </section>
   </main>
 }
