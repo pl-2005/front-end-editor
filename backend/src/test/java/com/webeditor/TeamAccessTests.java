@@ -31,19 +31,81 @@ class TeamAccessTests {
     @Autowired MockMvc mvc;
     @MockitoBean AuthRateLimiter limiter;
 
-    @Test void invitationIsBoundToEmailAndConsumedOnce() {
+    @Test void usernameInvitationIsVisibleOnlyToRecipientAndConsumedOnce() throws Exception {
         AppUser owner = user("owner");
         AppUser member = user("member");
         AppUser stranger = user("stranger");
         long teamId = teams.create(owner.getId(), "邀请测试", null).id();
-        var invite = teams.invite(teamId, owner.getId(), member.getEmail());
-        assertThatThrownBy(() -> teams.accept(stranger.getId(), invite.token()))
+        assertThat(teams.lookupInvitee(teamId, owner.getId(), member.getUsername()).userId()).isEqualTo(member.getId());
+        var invite = teams.invite(teamId, owner.getId(), member.getId());
+        assertThat(invite.username()).isEqualTo(member.getUsername());
+        assertThat(invite.inviteeUserId()).isEqualTo(member.getId());
+        mvc.perform(get("/api/teams/invitations/me").header("Authorization", bearer(member)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data[0].id").value(invite.id()));
+        mvc.perform(get("/api/teams/invitations/me").header("Authorization", bearer(stranger)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data").isEmpty());
+        assertThatThrownBy(() -> teams.accept(stranger.getId(), invite.id()))
                 .isInstanceOfSatisfying(TeamFailure.class, e -> assertThat(e.status()).isEqualTo(410));
-        teams.accept(member.getId(), invite.token());
+        mvc.perform(post("/api/teams/invitations/{id}/accept", invite.id())
+                .header("Authorization", bearer(member))).andExpect(status().isOk());
         assertThat(members.findByTeamIdAndUserId(teamId, member.getId()).orElseThrow().getRole()).isEqualTo("MEMBER");
-        assertThatThrownBy(() -> teams.accept(member.getId(), invite.token()))
+        assertThatThrownBy(() -> teams.accept(member.getId(), invite.id()))
                 .isInstanceOfSatisfying(TeamFailure.class, e -> assertThat(e.status()).isEqualTo(410));
         assertThat(users.findById(member.getId()).orElseThrow().getAuthzVersion()).isEqualTo(1);
+    }
+
+    @Test void unknownUserCannotBeInvitedAndRegisteredEmailCanBeRejected() throws Exception {
+        AppUser owner = user("owner");
+        AppUser stranger = user("stranger");
+        long teamId = teams.create(owner.getId(), "已注册邀请", null).id();
+        String email = "invited" + UUID.randomUUID().toString().substring(0, 12) + "@example.test";
+        assertThatThrownBy(() -> teams.lookupInvitee(teamId, owner.getId(), email))
+                .isInstanceOfSatisfying(TeamFailure.class, e -> { assertThat(e.status()).isEqualTo(404); assertThat(e.code()).isEqualTo("USER_NOT_FOUND"); });
+        assertThatThrownBy(() -> teams.lookupInvitee(teamId, owner.getId(), "missing" + UUID.randomUUID().toString().substring(0, 8)))
+                .isInstanceOfSatisfying(TeamFailure.class, e -> assertThat(e.status()).isEqualTo(404));
+        assertThat(teams.invitations(teamId, owner.getId())).isEmpty();
+        mvc.perform(get("/api/teams/{id}/invitees/lookup", teamId).param("identifier", email)
+                .header("Authorization", bearer(owner))).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
+        mvc.perform(post("/api/teams/{id}/invitations", teamId).header("Authorization", bearer(owner))
+                .contentType("application/json").content("{\"userId\":9223372036854775807}"))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("USER_NOT_FOUND"));
+        assertThat(teams.invitations(teamId, owner.getId())).isEmpty();
+        String name = "invited" + UUID.randomUUID().toString().substring(0, 12);
+        AppUser recipient = users.saveAndFlush(new AppUser(name, name, email, email, "{bcrypt}unused", name, "#123456"));
+        mvc.perform(get("/api/teams/{id}/invitees/lookup", teamId).param("identifier", email)
+                .header("Authorization", bearer(owner))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.userId").value(recipient.getId()));
+        mvc.perform(get("/api/teams/{id}/invitees/lookup", teamId).param("identifier", email)
+                .header("Authorization", bearer(stranger))).andExpect(status().isNotFound());
+        var invite = teams.invite(teamId, owner.getId(), recipient.getId());
+        assertThat(invite.inviteeUserId()).isEqualTo(recipient.getId());
+        assertThatThrownBy(() -> teams.invite(teamId, owner.getId(), recipient.getId()))
+                .isInstanceOfSatisfying(TeamFailure.class, e -> assertThat(e.status()).isEqualTo(409));
+        assertThatThrownBy(() -> teams.rejectInvitation(stranger.getId(), invite.id()))
+                .isInstanceOfSatisfying(TeamFailure.class, e -> assertThat(e.status()).isEqualTo(410));
+        assertThat(teams.myInvitations(recipient.getId())).extracting(TeamService.MyInvitationView::id).contains(invite.id());
+        mvc.perform(post("/api/teams/invitations/{id}/reject", invite.id())
+                .header("Authorization", bearer(recipient))).andExpect(status().isNoContent());
+        assertThat(teams.myInvitations(recipient.getId())).isEmpty();
+        var next = teams.invite(teamId, owner.getId(), recipient.getId());
+        teams.accept(recipient.getId(), next.id());
+        assertThat(members.findByTeamIdAndUserId(teamId, recipient.getId())).isPresent();
+    }
+
+    @Test void ownerCanRevokeEmailInvitationAndMemberCannotInvite() {
+        AppUser owner = user("owner");
+        AppUser member = user("member");
+        AppUser recipient = user("recipient");
+        long teamId = teams.create(owner.getId(), "撤销邀请", null).id();
+        teams.decide(teamId, owner.getId(), teams.request(teamId, member.getId()).id(), true);
+        var invite = teams.invite(teamId, owner.getId(), recipient.getId());
+        assertThatThrownBy(() -> teams.invite(teamId, member.getId(), recipient.getId()))
+                .isInstanceOfSatisfying(TeamFailure.class, e -> assertThat(e.status()).isEqualTo(403));
+        teams.revokeInvitation(teamId, owner.getId(), invite.id());
+        assertThat(teams.myInvitations(recipient.getId())).isEmpty();
+        assertThatThrownBy(() -> teams.accept(recipient.getId(), invite.id()))
+                .isInstanceOfSatisfying(TeamFailure.class, e -> assertThat(e.status()).isEqualTo(410));
     }
 
     @Test void requestTransferAndRemovalImmediatelyAffectAccess() throws Exception {
@@ -68,6 +130,24 @@ class TeamAccessTests {
         mvc.perform(get("/api/teams/{id}/members", teamId).header("Authorization", bearer(owner)))
                 .andExpect(status().isNotFound());
         assertThat(members.findByTeamIdAndUserId(teamId, member.getId()).orElseThrow().getRole()).isEqualTo("OWNER");
+    }
+
+    @Test void applicantCanSeeAndWithdrawOwnPendingRequest() throws Exception {
+        AppUser owner = user("owner");
+        AppUser applicant = user("applicant");
+        AppUser other = user("other");
+        long teamId = teams.create(owner.getId(), "申请状态测试", null).id();
+        teams.request(teamId, applicant.getId());
+        mvc.perform(get("/api/teams/join-requests/me").header("Authorization", bearer(applicant)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].teamId").value(teamId));
+        mvc.perform(get("/api/teams/join-requests/me").header("Authorization", bearer(other)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
+        teams.withdraw(teamId, applicant.getId());
+        mvc.perform(get("/api/teams/join-requests/me").header("Authorization", bearer(applicant)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data").isEmpty());
     }
 
     @Test void legacyProjectAndOldApiStayClosed() throws Exception {

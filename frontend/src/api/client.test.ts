@@ -49,4 +49,18 @@ describe('API client authentication', () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(null, { status: 204 }))))
     await expect(request('/api/empty', { method: 'POST' })).resolves.toBeUndefined()
   })
+
+  it('does not replay an in-flight request under a newly logged-in account', async () => {
+    setCredentials({ user, accessToken: 'old', refreshToken: 'old-refresh', expiresIn: 600 })
+    let finish!: (response: Response) => void
+    const fetcher = vi.fn(() => new Promise<Response>(resolve => { finish = resolve }))
+    vi.stubGlobal('fetch', fetcher)
+    const pending = request('/api/private')
+    await Promise.resolve()
+    await Promise.resolve()
+    setCredentials({ user: { ...user, id: 2 }, accessToken: 'other', refreshToken: 'other-refresh', expiresIn: 600 })
+    finish(new Response(null, { status: 401 }))
+    await expect(pending).rejects.toThrow('登录状态已变化')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
 })

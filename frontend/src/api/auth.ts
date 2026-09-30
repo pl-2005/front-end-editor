@@ -3,14 +3,20 @@ import type { Credentials, User } from '../types/auth'
 let credentials: Credentials | null = null
 let expiresAt = 0
 let refreshPromise: Promise<Credentials> | null = null
+let generation = 0
+let sessionGeneration = 0
 const listeners = new Set<() => void>()
 
 function notify() { listeners.forEach((listener) => listener()) }
 export function subscribeAuth(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } }
 export function getAuthUser() { return credentials?.user ?? null }
 export function getAccessToken() { return credentials?.accessToken ?? null }
-export function clearAuth() { credentials = null; expiresAt = 0; notify() }
-export function setCredentials(next: Credentials) { credentials = next; expiresAt = Date.now() + next.expiresIn * 1000; notify() }
+export function getAuthSession() { return sessionGeneration }
+export function clearAuth() { generation++; sessionGeneration++; credentials = null; expiresAt = 0; refreshPromise = null; notify() }
+export function setCredentials(next: Credentials, preserveSession = false) {
+  generation++; if (!preserveSession) sessionGeneration++
+  credentials = next; expiresAt = Date.now() + next.expiresIn * 1000; notify()
+}
 
 async function authRequest<T>(path: string, body: object): Promise<T> {
   const response = await fetch(path, { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -36,10 +42,17 @@ export async function login(loginName: string, password: string) {
 export async function refreshCredentials() {
   if (!credentials) throw new Error('需要登录')
   if (!refreshPromise) {
-    refreshPromise = authRequest<Credentials>('/api/auth/refresh', { refreshToken: credentials.refreshToken })
-      .then((next) => { setCredentials(next); return next })
-      .catch((error) => { clearAuth(); throw error })
-      .finally(() => { refreshPromise = null })
+    const startedAt = generation
+    const currentRefreshToken = credentials.refreshToken
+    const pending = authRequest<Credentials>('/api/auth/refresh', { refreshToken: currentRefreshToken })
+      .then((next) => {
+        if (generation !== startedAt) throw new Error('登录状态已变化')
+        setCredentials(next, true)
+        return next
+      })
+      .catch((error) => { if (generation === startedAt) clearAuth(); throw error })
+      .finally(() => { if (refreshPromise === pending) refreshPromise = null })
+    refreshPromise = pending
   }
   return refreshPromise
 }

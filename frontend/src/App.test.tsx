@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import App, { WorkspaceApp } from './App'
+import App from './App'
+import { WorkspaceApp } from './LegacyWorkspaceApp'
 import { clearAuth, setCredentials } from './api/auth'
 import { putDraft } from './persistence/drafts'
 
@@ -59,17 +60,21 @@ vi.mock('@codesandbox/sandpack-react', async () => {
 describe('V2 login landing', () => {
   afterEach(() => { clearAuth(); vi.unstubAllGlobals() })
 
-  it('does not request legacy projects after login', () => {
-    const fetchMock = vi.fn()
+  it('loads teams without requesting legacy projects after login', async () => {
+    window.history.replaceState(null, '', '/teams')
+    const fetchMock = vi.fn((path: string) => {
+      expect(path).toBe('/api/teams?size=100')
+      return Promise.resolve(envelope({ content: [], number: 0, size: 100, totalElements: 0, totalPages: 0 }))
+    })
     vi.stubGlobal('fetch', fetchMock)
     setCredentials({ user: { id: 1, username: 'tester', email: null, displayName: 'Tester', avatarColor: '#6366F1' },
       accessToken: 'test-access-token', refreshToken: 'test-refresh-token', expiresIn: 600 })
 
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: '账号已就绪' })).toBeTruthy()
-    expect(screen.getByText('团队与项目功能仍在开发中，当前暂不能创建或打开项目。')).toBeTruthy()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: '我的团队' })).toBeTruthy()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(fetchMock.mock.calls.every(([path]) => String(path).startsWith('/api/teams'))).toBe(true)
   })
 })
 

@@ -12,7 +12,7 @@
 
 ## 数据迁移与旧项目
 
-V6 追加 `team`、`team_member`、`team_invitation`、`team_join_request`，并给 `project` 加可空 `team_id`、`created_by` 和 `legacy_unowned`。团队只有 OWNER/MEMBER，成员只有 ACTIVE/REMOVED；邀请与加入申请各有有限状态和过期/消费时间。邀请 token 只保存摘要。V7 约束新项目必须有团队和创建人，旧匿名项目才允许缺失。后续存储迁移按实际顺序追加，**不新增或回填 revision 元数据**。已发布 Flyway 文件不改写。
+V6 追加 `team`、`team_member`、`team_invitation`、`team_join_request`，并给 `project` 加可空 `team_id`、`created_by` 和 `legacy_unowned`。团队只有 OWNER/MEMBER，成员只有 ACTIVE/REMOVED；邀请与加入申请各有有限状态和过期/消费时间。V7 约束新项目必须有团队和创建人，旧匿名项目才允许缺失。V8 为邀请增加受邀用户 ID、`REJECTED` 状态和待处理目标唯一约束，并迁移已有邀请数据。V9 撤销无法绑定已注册账号的待处理邀请，并约束待处理邀请必须有受邀用户 ID。后续存储迁移按实际顺序追加，**不新增或回填 revision 元数据**。已发布 Flyway 文件不改写。
 
 V1 项目没有可验证所有者。停写后将迁移前项目标记 `legacy_unowned=true`，保留原项目、revision 和 MinIO 对象；不认领、不分配、不导入。V2 列表、详情、文件、复制、删除、票据和内部网关入口全部排除旧匿名项目。新团队项目创建流程不写 `project_revision`；步骤 05 从服务端模板创建初始 Y.Doc。步骤 05 前可将新项目创建入口保持关闭，避免出现没有内容指针的项目；团队与成员功能可先完成。
 
@@ -23,8 +23,12 @@ V1 项目没有可验证所有者。停写后将迁移前项目标记 `legacy_un
 - 任何已登录用户可以创建团队并成为 OWNER；同一用户可属于多个团队。
 - 团队加入策略为 `REQUEST`（默认）或 `INVITE_ONLY`。团队发现只显示允许申请加入团队的公开基本资料，不显示成员或项目。
 - 未加入用户可申请或撤回申请；OWNER 批准或拒绝。批准事务复核团队 ACTIVE、策略允许、申请人存在且尚非成员，再创建 MEMBER。申请中没有团队资源权限。
-- OWNER 可创建和撤销邀请。邀请链接使用 URL fragment，前端读取后清除地址；接受通过 POST body 提交，token 不进入日志、查询参数或浏览器持久层。接受时复核目标团队、过期状态和绑定邮箱，原子消费。无效/过期/已用/撤销统一返回 410。
+- OWNER 按用户名或邮箱查找已注册用户，页面显示账号供确认，然后按用户 ID 发送站内邀请；查不到用户返回 `USER_NOT_FOUND`，不创建邀请。发送时服务端再次确认用户存在且未加入团队。OWNER 可撤销待处理邀请；每个团队对同一用户只保留一份待处理邀请，默认 7 天有效，不发送邮件。受邀人在“我的邀请”查看并接受或拒绝，接受时复核目标团队、过期状态、受邀身份和成员关系，原子加入为 MEMBER。无效、过期、已处理或撤销统一返回 410。
 - MEMBER 可自行退出；OWNER 须先转移。OWNER 可移除其他成员，但不能移除自己造成无 OWNER 团队。
+
+站内受邀接口：`GET /api/teams/{teamId}/invitees/lookup?identifier=...` 仅 OWNER 可调用，按用户名或邮箱精确查找，返回用户 ID、用户名和显示名称。`POST /api/teams/{teamId}/invitations { userId }` 仅 OWNER 可调用，按已确认用户 ID 创建邀请；`GET /api/teams/{teamId}/invitations` 和 `DELETE /api/teams/{teamId}/invitations/{invitationId}` 供 OWNER 查看与撤销。受邀人通过 `GET /api/teams/invitations/me` 查询待处理邀请，使用 `POST /api/teams/invitations/{invitationId}/accept` 或 `/reject` 处理。
+
+2026-09-30 本机验证：V8、V9 已在根 `.env` 指向的 MySQL 8.0.46 上执行成功，Hibernate schema 校验通过；后端 27 个测试通过。默认 8080 端口已占用，改用临时 18080 端口后应用完整启动成功，验收后停止临时进程。
 
 ## API 边界
 

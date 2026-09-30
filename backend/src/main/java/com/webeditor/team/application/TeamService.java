@@ -5,14 +5,9 @@ import com.webeditor.identity.domain.AppUser;
 import com.webeditor.identity.repository.AppUserRepository;
 import com.webeditor.team.domain.*;
 import com.webeditor.team.repository.*;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.HexFormat;
 import java.util.List;
-import java.util.Base64;
 import jakarta.persistence.EntityManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -21,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TeamService {
-    private static final SecureRandom RANDOM = new SecureRandom();
     private final TeamRepository teams;
     private final TeamMemberRepository members;
     private final TeamInvitationRepository invitations;
@@ -39,8 +33,10 @@ public class TeamService {
     }
     public record MemberView(long userId, String username, String displayName, String role) {}
     public record RequestView(long id, long userId, String username, String status, Instant createdAt) {}
-    public record InvitationView(long id, String email, String status, Instant expiresAt) {}
-    public record IssuedInvitation(long id, String token, Instant expiresAt) {}
+    public record MyRequestView(long id, long teamId, String status, Instant createdAt) {}
+    public record InviteeView(long userId, String username, String displayName) {}
+    public record InvitationView(long id, Long inviteeUserId, String username, String email, String status, Instant expiresAt) {}
+    public record MyInvitationView(long id, long teamId, String teamName, Instant expiresAt) {}
 
     @Transactional
     public TeamView create(long userId, String name, String description) {
@@ -92,6 +88,12 @@ public class TeamService {
         else if (!"PENDING".equals(request.getStatus())) request.reopen();
         return view(requests.saveAndFlush(request));
     }
+    @Transactional(readOnly = true)
+    public List<MyRequestView> myPendingRequests(long userId) {
+        requireUser(userId);
+        return requests.findByUserIdAndStatusOrderByCreatedAt(userId, "PENDING").stream()
+                .map(r -> new MyRequestView(r.getId(), r.getTeamId(), r.getStatus(), r.getCreatedAt())).toList();
+    }
     @Transactional
     public void withdraw(long teamId, long userId) {
         lockTeam(teamId);
@@ -119,23 +121,54 @@ public class TeamService {
         }
         request.resolve(approve ? "APPROVED" : "REJECTED");
     }
+    @Transactional(readOnly = true)
+    public InviteeView lookupInvitee(long teamId, long userId, String identifier) {
+        access.owner(teamId, userId);
+        AppUser target = findInvitee(identifier);
+        if (members.findByTeamIdAndUserIdAndStatus(teamId, target.getId(), "ACTIVE").isPresent())
+            throw conflict("用户已是团队成员");
+        return new InviteeView(target.getId(), target.getUsername(), target.getDisplayName());
+    }
+    private AppUser findInvitee(String identifier) {
+        boolean byEmail = identifier != null && identifier.contains("@");
+        String normalized = IdentityInput.normalize(identifier, byEmail ? 254 : 50);
+        if (byEmail && normalized.indexOf('@') != normalized.lastIndexOf('@'))
+            throw new IllegalArgumentException("邮箱格式无效");
+        return (byEmail ? users.findByNormalizedEmail(normalized) : users.findByNormalizedUsername(normalized))
+                .orElseThrow(() -> new TeamFailure(404, "USER_NOT_FOUND", "未找到对应的已注册用户"));
+    }
     @Transactional
-    public IssuedInvitation invite(long teamId, long userId, String email) {
+    public InvitationView invite(long teamId, long userId, long inviteeUserId) {
         lockTeam(teamId);
         access.owner(teamId, userId);
-        String normalized = IdentityInput.normalize(email, 254);
-        if (!normalized.contains("@")) throw new IllegalArgumentException("邮箱格式无效");
-        byte[] secret = new byte[32]; RANDOM.nextBytes(secret);
-        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
-        TeamInvitation invitation = invitations.saveAndFlush(new TeamInvitation(teamId, normalized, hash(token),
-                Instant.now().plus(7, ChronoUnit.DAYS)));
-        return new IssuedInvitation(invitation.getId(), token, invitation.getExpiresAt());
+        AppUser target = requireUser(inviteeUserId);
+        if (members.findByTeamIdAndUserIdAndStatus(teamId, target.getId(), "ACTIVE").isPresent())
+            throw conflict("用户已是团队成员");
+        String email = target.getNormalizedEmail();
+        List<TeamInvitation> pending = invitations.findPendingForTeamUser(teamId, target.getId());
+        for (TeamInvitation prior : pending) {
+            if (prior.usable()) throw conflict("已有待处理邀请");
+            prior.revoke();
+        }
+        invitations.flush();
+        TeamInvitation invitation = invitations.saveAndFlush(new TeamInvitation(teamId,
+                target.getId(), email, Instant.now().plus(7, ChronoUnit.DAYS)));
+        return invitationView(invitation);
     }
     @Transactional(readOnly = true)
     public List<InvitationView> invitations(long teamId, long userId) {
         access.owner(teamId, userId);
-        return invitations.findByTeamIdOrderByIdDesc(teamId).stream()
-                .map(i -> new InvitationView(i.getId(), i.getEmailNormalized(), i.getStatus(), i.getExpiresAt())).toList();
+        return invitations.findByTeamIdOrderByIdDesc(teamId).stream().map(this::invitationView).toList();
+    }
+    @Transactional(readOnly = true)
+    public List<MyInvitationView> myInvitations(long userId) {
+        requireUser(userId);
+        return invitations.findPendingForUser(userId).stream()
+                .filter(TeamInvitation::usable)
+                .flatMap(invitation -> teams.findById(invitation.getTeamId()).stream()
+                        .filter(team -> "ACTIVE".equals(team.getStatus()))
+                        .map(team -> new MyInvitationView(invitation.getId(), team.getId(), team.getName(), invitation.getExpiresAt())))
+                .toList();
     }
     @Transactional
     public void revokeInvitation(long teamId, long userId, long invitationId) {
@@ -147,17 +180,25 @@ public class TeamService {
         invitation.revoke();
     }
     @Transactional
-    public TeamView accept(long userId, String token) {
+    public TeamView accept(long userId, long invitationId) {
         AppUser user = requireUser(userId);
-        TeamInvitation invitation = invitations.findByTokenHash(hash(token)).orElseThrow(TeamService::gone);
+        TeamInvitation invitation = invitations.findById(invitationId).orElseThrow(TeamService::gone);
         Team team = lockTeam(invitation.getTeamId());
         entityManager.refresh(invitation);
-        if (!invitation.usable() || user.getNormalizedEmail() == null
-                || !user.getNormalizedEmail().equals(invitation.getEmailNormalized())) throw gone();
+        if (!invitation.usable() || !addressedTo(invitation, user)) throw gone();
         if (members.findByTeamIdAndUserIdAndStatus(team.getId(), userId, "ACTIVE").isPresent()) throw gone();
         activate(team.getId(), userId);
         invitation.consume();
         return TeamView.of(team);
+    }
+    @Transactional
+    public void rejectInvitation(long userId, long invitationId) {
+        AppUser user = requireUser(userId);
+        TeamInvitation invitation = invitations.findById(invitationId).orElseThrow(TeamService::gone);
+        lockTeam(invitation.getTeamId());
+        entityManager.refresh(invitation);
+        if (!invitation.usable() || !addressedTo(invitation, user)) throw gone();
+        invitation.reject();
     }
     @Transactional
     public void leave(long teamId, long userId) {
@@ -187,10 +228,13 @@ public class TeamService {
         return teams.lockActive(teamId).orElseThrow(() -> new TeamFailure(404, "TEAM_NOT_FOUND", "团队不存在"));
     }
     private void activate(long teamId, long userId) {
+        requireUser(userId);
         TeamMember old = members.findByTeamIdAndUserId(teamId, userId).orElse(null);
         if (old == null) members.save(new TeamMember(teamId, userId, "MEMBER"));
         else if ("ACTIVE".equals(old.getStatus())) throw conflict("已是团队成员");
         else old.activate();
+        invitations.findPendingForTeamUser(teamId, userId)
+                .forEach(TeamInvitation::revoke);
         bump(userId);
     }
     private void bump(long userId) {
@@ -203,11 +247,17 @@ public class TeamService {
         AppUser user = requireUser(request.getUserId());
         return new RequestView(request.getId(), user.getId(), user.getUsername(), request.getStatus(), request.getCreatedAt());
     }
+    private InvitationView invitationView(TeamInvitation invitation) {
+        AppUser user = invitation.getInviteeUserId() == null ? null
+                : users.findById(invitation.getInviteeUserId()).orElse(null);
+        return new InvitationView(invitation.getId(), invitation.getInviteeUserId(),
+                user == null ? null : user.getUsername(), invitation.getEmailNormalized(),
+                invitation.getStatus(), invitation.getExpiresAt());
+    }
+    private static boolean addressedTo(TeamInvitation invitation, AppUser user) {
+        return invitation.getInviteeUserId() != null && invitation.getInviteeUserId().equals(user.getId());
+    }
     private static String trim(String value) { return value == null || value.isBlank() ? null : value.trim(); }
     private static TeamFailure conflict(String message) { return new TeamFailure(409, "TEAM_STATE_CONFLICT", message); }
     private static TeamFailure gone() { return new TeamFailure(410, "INVITATION_GONE", "邀请无效或已过期"); }
-    private static String hash(String token) {
-        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8))); }
-        catch (Exception e) { throw new IllegalStateException(e); }
-    }
 }

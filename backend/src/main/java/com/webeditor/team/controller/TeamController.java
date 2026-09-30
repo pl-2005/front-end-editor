@@ -19,8 +19,7 @@ public class TeamController {
     public TeamController(TeamService teams, AuthRateLimiter limiter) { this.teams = teams; this.limiter = limiter; }
     public record Create(@NotBlank @Size(max = 100) String name, @Size(max = 500) String description) {}
     public record Policy(@NotBlank String joinPolicy) {}
-    public record Invite(@NotBlank @Email String email) {}
-    public record Accept(@NotBlank String token) {}
+    public record Invite(@Min(1) long userId) {}
     public record Transfer(@Min(1) long userId) {}
 
     @PostMapping
@@ -55,6 +54,10 @@ public class TeamController {
     ResponseEntity<ApiResponse<TeamService.RequestView>> request(@PathVariable @Min(1) long teamId) {
         return ResponseEntity.status(201).body(ApiResponse.created(teams.request(teamId, CurrentUser.id())));
     }
+    @GetMapping("/join-requests/me")
+    ApiResponse<List<TeamService.MyRequestView>> myPendingRequests() {
+        return ApiResponse.ok(teams.myPendingRequests(CurrentUser.id()));
+    }
     @DeleteMapping("/{teamId}/join-requests/me")
     ResponseEntity<Void> withdraw(@PathVariable @Min(1) long teamId) {
         teams.withdraw(teamId, CurrentUser.id()); return ResponseEntity.noContent().build();
@@ -72,10 +75,14 @@ public class TeamController {
         teams.decide(teamId, CurrentUser.id(), requestId, false); return ResponseEntity.noContent().build();
     }
     @PostMapping("/{teamId}/invitations")
-    ResponseEntity<ApiResponse<TeamService.IssuedInvitation>> invite(@PathVariable @Min(1) long teamId,
+    ResponseEntity<ApiResponse<TeamService.InvitationView>> invite(@PathVariable @Min(1) long teamId,
             @Valid @RequestBody Invite body) {
-        return ResponseEntity.status(201).header("Cache-Control", "no-store")
-                .body(ApiResponse.created(teams.invite(teamId, CurrentUser.id(), body.email())));
+        return ResponseEntity.status(201).body(ApiResponse.created(teams.invite(teamId, CurrentUser.id(), body.userId())));
+    }
+    @GetMapping("/{teamId}/invitees/lookup")
+    ApiResponse<TeamService.InviteeView> lookupInvitee(@PathVariable @Min(1) long teamId,
+            @RequestParam @NotBlank @Size(max = 254) String identifier) {
+        return ApiResponse.ok(teams.lookupInvitee(teamId, CurrentUser.id(), identifier));
     }
     @GetMapping("/{teamId}/invitations")
     ApiResponse<List<TeamService.InvitationView>> invitations(@PathVariable @Min(1) long teamId) {
@@ -85,9 +92,17 @@ public class TeamController {
     ResponseEntity<Void> revoke(@PathVariable @Min(1) long teamId, @PathVariable @Min(1) long invitationId) {
         teams.revokeInvitation(teamId, CurrentUser.id(), invitationId); return ResponseEntity.noContent().build();
     }
-    @PostMapping("/invitations/accept")
-    ApiResponse<TeamService.TeamView> accept(@Valid @RequestBody Accept body) {
-        return ApiResponse.ok(teams.accept(CurrentUser.id(), body.token()));
+    @GetMapping("/invitations/me")
+    ApiResponse<List<TeamService.MyInvitationView>> myInvitations() {
+        return ApiResponse.ok(teams.myInvitations(CurrentUser.id()));
+    }
+    @PostMapping("/invitations/{invitationId}/accept")
+    ApiResponse<TeamService.TeamView> accept(@PathVariable @Min(1) long invitationId) {
+        return ApiResponse.ok(teams.accept(CurrentUser.id(), invitationId));
+    }
+    @PostMapping("/invitations/{invitationId}/reject")
+    ResponseEntity<Void> reject(@PathVariable @Min(1) long invitationId) {
+        teams.rejectInvitation(CurrentUser.id(), invitationId); return ResponseEntity.noContent().build();
     }
     @DeleteMapping("/{teamId}/members/me")
     ResponseEntity<Void> leave(@PathVariable @Min(1) long teamId) {
