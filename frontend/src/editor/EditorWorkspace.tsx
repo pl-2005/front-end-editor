@@ -24,10 +24,18 @@ const DEFAULT_CONSOLE_HEIGHT = 190
 const MIN_CONSOLE_HEIGHT = 100
 const MIN_EDITOR_HEIGHT = 120
 
+/**
+ * 将 Sandpack 的字符串或对象文件统一为项目持久化使用的 code 对象。
+ *
+ * @param files 文件集合
+ */
 function toProjectFiles(files: SandpackFiles): ProjectFiles {
   return Object.fromEntries(Object.entries(files).map(([path, file]) => [path, { code: typeof file === 'string' ? file : file.code }]))
 }
 
+/**
+ * 连接 Sandpack 编辑器、预览、文件操作、自动保存和版本历史，并管理控制台尺寸。
+ */
 function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recoveredDraft, onVersionChange, onReload, onSaveCopy }: Omit<Props, 'providerKey'>) {
   const { sandpack } = useSandpack()
   const workspaceRef = useRef<HTMLElement>(null)
@@ -41,12 +49,23 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
   )
   const { status, message, save } = useProjectSave({ projectId: project.id, initialVersion: project.version, entry: project.entry, files, onVersionChange, initiallyDirty: recoveredDraft })
 
+  /**
+   * 创建空文件并在编辑器中打开，将其加入待保存文件集合。
+   *
+   * @param path 目标路径
+   */
   const createFile = useCallback((path: string) => {
     if (sandpack.files[path]) { window.alert('该文件已存在'); return }
     sandpack.addFile(path, '')
     sandpack.openFile(path)
   }, [sandpack])
 
+  /**
+   * 复制原内容到新路径后移除旧路径，再激活新文件。
+   *
+   * @param from 原文件路径
+   * @param to 新文件路径
+   */
   const renameFile = useCallback((from: string, to: string) => {
     if (from === to) return
     if (from === project.entry) { window.alert('入口文件不能重命名'); return }
@@ -58,12 +77,20 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
     sandpack.openFile(to)
   }, [project.entry, sandpack])
 
+  /**
+   * 禁止删除入口或最后一个文件，确认后从 Sandpack 文件集合移除指定路径。
+   *
+   * @param path 目标路径
+   */
   const removeFile = useCallback((path: string) => {
     if (path === project.entry) { window.alert('入口文件不能删除'); return }
     if (Object.keys(sandpack.files).length === 1) { window.alert('项目至少需要保留一个文件'); return }
     if (window.confirm(`确定删除 ${path}？`)) sandpack.deleteFile(path)
   }, [project.entry, sandpack])
 
+  /**
+   * 询问副本名称后提交当前入口及文件，供版本冲突时另存使用。
+   */
   const saveCopy = useCallback(async () => {
     const name = window.prompt('副本项目名称', `${project.name} 副本`)?.trim()
     if (name) await onSaveCopy(name, project.entry,
@@ -73,6 +100,11 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
   useEffect(() => {
     if (!isResizingConsole) return
 
+    /**
+     * 根据指针纵向位移更新控制台高度，并限制在工作区可用范围内。
+     *
+     * @param event 浏览器输入事件
+     */
     const resize = (event: PointerEvent) => {
       const start = resizeStartRef.current
       if (!start) return
@@ -80,6 +112,9 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
       const maximumHeight = Math.max(MIN_CONSOLE_HEIGHT, workspaceHeight - 46 - MIN_EDITOR_HEIGHT)
       setConsoleHeight(Math.min(maximumHeight, Math.max(MIN_CONSOLE_HEIGHT, start.height + start.pointerY - event.clientY)))
     }
+    /**
+     * 清除拖动起点并结束控制台尺寸调整状态。
+     */
     const stopResizing = () => {
       resizeStartRef.current = null
       setIsResizingConsole(false)
@@ -95,6 +130,11 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
     }
   }, [isResizingConsole])
 
+  /**
+   * 记录拖动起点和当前高度，启用控制台尺寸调整。
+   *
+   * @param event 浏览器输入事件
+   */
   const startConsoleResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
     event.preventDefault()
@@ -136,6 +176,9 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
   </section>
 }
 
+/**
+ * 准备临时预览文件并创建 Sandpack Provider；providerKey 改变时重新初始化编辑器会话。
+ */
 export function EditorWorkspace({ project, files, providerKey, recoveryMessage, recoveredDraft, onVersionChange, onReload, onSaveCopy }: Props) {
   const customSetup = useMemo(() => ({ entry: project.entry }), [project.entry])
   const runtimeFiles = useMemo(() => prepareSandpackFiles(files), [files])

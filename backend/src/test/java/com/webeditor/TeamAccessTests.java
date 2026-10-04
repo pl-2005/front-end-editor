@@ -166,7 +166,8 @@ class TeamAccessTests {
                 .andExpect(status().isForbidden());
         mvc.perform(post("/api/teams/{id}/projects", teamId).header("Authorization", bearer(owner))
                         .contentType("application/json").content("{\"name\":\"early\"}"))
-                .andExpect(status().isMethodNotAllowed());
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("COLLAB_CREATION_DISABLED"));
     }
 
     private AppUser user(String prefix) {

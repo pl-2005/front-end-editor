@@ -11,7 +11,20 @@ import org.springframework.stereotype.Component;
 @Component
 public class SecurityErrors {
     private final ObjectMapper mapper;
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param mapper JSON 序列化器
+     */
     public SecurityErrors(ObjectMapper mapper) { this.mapper = mapper; }
+    /**
+     * 设置状态码、UTF-8 JSON 和禁止缓存响应头，再写入统一认证错误。
+     *
+     * @param request 当前 HTTP 请求
+     * @param response HTTP 响应
+     * @param status HTTP 状态码
+     * @param code 业务错误码
+     */
     public void write(HttpServletRequest request, HttpServletResponse response, int status, String code) throws IOException {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);

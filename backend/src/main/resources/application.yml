@@ -24,6 +24,16 @@ spring:
     enabled: true
 
 editor:
+  collaboration:
+    creation-enabled: ${COLLAB_CREATION_ENABLED:false}
+    storage-secret: ${COLLAB_STORAGE_SECRET:}
+    initializer:
+      url: ${COLLAB_INITIALIZER_URL:http://127.0.0.1:8091/internal/initialize}
+      secret: ${COLLAB_INITIALIZER_SECRET:}
+    cleanup:
+      recovery-window: ${COLLAB_RECOVERY_WINDOW:30d}
+      confirmation-window: ${COLLAB_CONFIRMATION_WINDOW:24h}
+      cron: ${COLLAB_CLEANUP_CRON:0 0 4 * * *}
   auth:
     issuer: ${JWT_ISSUER:web-editor}
     audience: ${JWT_AUDIENCE:web-editor-api}

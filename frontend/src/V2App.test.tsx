@@ -9,9 +9,62 @@ const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 2
 describe('V2 routes', () => {
   afterEach(() => { clearAuth(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/') })
 
+  it('lets a member create a project without submitting browser files or a revision', async () => {
+    window.history.replaceState(null, '', '/teams/9')
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    const project = { id: 17, name: 'New project', description: null, template: 'vanilla', entry: '/index.html', stateVersion: 1,
+      createdAt: '2026-10-04T00:00:00Z', updatedAt: '2026-10-04T00:00:00Z',
+      collaboration: { collaborationMode: 'YJS', epoch: 1, generation: 1, contentHash: 'hash', size: 500, contentType: 'application/octet-stream' } }
+    const fetcher = vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/api/teams/9') return Promise.resolve(ok({ id: 9, name: 'Team', joinPolicy: 'REQUEST' }))
+      if (path === '/api/teams/9/members') return Promise.resolve(ok([{ userId: 4, username: 'member', displayName: 'Member', role: 'MEMBER' }]))
+      if (path === '/api/teams/9/projects' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ name: 'New project', template: 'vanilla', entry: '/index.html' })
+        return Promise.resolve(ok(project))
+      }
+      if (path === '/api/teams/9/projects?size=100') return Promise.resolve(ok({ items: [], totalElements: 0 }))
+      if (path === '/api/teams/9/projects/17') return Promise.resolve(ok(project))
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Team' })
+    fireEvent.change(screen.getByRole('textbox', { name: '项目名称' }), { target: { value: 'New project' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    await screen.findByRole('heading', { name: 'New project' })
+    expect(screen.getByRole('button', { name: '删除' }).hasAttribute('disabled')).toBe(true)
+    expect(fetcher.mock.calls.every(([path]) => !path.includes('snapshot') && !path.includes('revision'))).toBe(true)
+  })
+
+  it('retries the reserved project after initialization fails', async () => {
+    window.history.replaceState(null, '', '/teams/9')
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    const project = { id: 18, name: 'Retry project', stateVersion: 1, collaboration: { generation: 1 } }
+    const fetcher = vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/api/teams/9') return Promise.resolve(ok({ id: 9, name: 'Team', joinPolicy: 'REQUEST' }))
+      if (path === '/api/teams/9/members') return Promise.resolve(ok([{ userId: 4, username: 'member', displayName: 'Member', role: 'MEMBER' }]))
+      if (path === '/api/teams/9/projects?size=100') return Promise.resolve(ok({ items: [], totalElements: 0 }))
+      if (path === '/api/teams/9/projects' && init?.method === 'POST') return Promise.resolve(new Response(JSON.stringify({ code: 'COLLAB_INITIALIZATION_FAILED' }), {
+        status: 503, headers: { 'Content-Type': 'application/json', 'X-Initializing-Project': '18' },
+      }))
+      if (path === '/api/teams/9/projects/18/initialize') { expect(init?.method).toBe('POST'); return Promise.resolve(ok(project)) }
+      if (path === '/api/teams/9/projects/18') return Promise.resolve(ok(project))
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Team' })
+    fireEvent.change(screen.getByRole('textbox', { name: '项目名称' }), { target: { value: 'Retry project' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(await screen.findByRole('button', { name: '重试项目初始化' }))
+    await screen.findByRole('heading', { name: 'Retry project' })
+    expect(fetcher.mock.calls.filter(([path]) => path === '/api/teams/9/projects')).toHaveLength(1)
+  })
+
   it('returns to login after registration without logging in', async () => {
     window.history.replaceState(null, '', '/register')
-    const fetcher = vi.fn((path: string, _init?: RequestInit) => {
+    const fetcher = vi.fn((path: string, init?: RequestInit) => {
+      void init
       expect(path).toBe('/api/auth/register')
       return Promise.resolve(ok(user))
     })
@@ -142,7 +195,8 @@ describe('V2 routes', () => {
   it('shows no-user feedback without sending an invitation', async () => {
     window.history.replaceState(null, '', '/teams/9')
     setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
-    const fetcher = vi.fn((path: string, _init?: RequestInit) => {
+    const fetcher = vi.fn((path: string, init?: RequestInit) => {
+      void init
       if (path === '/api/teams/9') return Promise.resolve(ok({ id: 9, name: 'Team', description: null, joinPolicy: 'REQUEST' }))
       if (path === '/api/teams/9/members') return Promise.resolve(ok([{ userId: 4, username: 'member', displayName: 'Member', role: 'OWNER' }]))
       if (path.startsWith('/api/teams/9/projects')) return Promise.resolve(ok({ items: [], page: 0, size: 100, totalElements: 0, totalPages: 0 }))

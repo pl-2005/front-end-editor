@@ -3,12 +3,19 @@ import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams } 
 import { getAuthUser, login, logout, register, subscribeAuth } from './api/auth'
 import { ApiError } from './api/client'
 import * as teams from './api/teams'
-import type { ProjectDetails, ProjectSummary } from './types/project'
+import type { TeamProjectDetails, TeamProjectSummary } from './types/collaboration'
 import type { Invitation, Invitee, JoinRequest, Member, MyInvitation, Team } from './types/team'
 
+/**
+ * 将 API 业务码、状态及限流等待时间转换为适合页面展示的中文错误提示。
+ *
+ * @param error 待展示的错误
+ */
 function message(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === 'USER_NOT_FOUND') return '未找到该用户，请先确认用户名或邮箱，并请对方注册账号。'
+    if (error.code === 'COLLAB_CREATION_DISABLED') return '项目创建暂未开放。'
+    if (error.code === 'COLLAB_INITIALIZATION_FAILED' || error.code === 'COLLAB_INITIALIZER_UNAVAILABLE' || error.code === 'STORAGE_UNAVAILABLE') return '项目文件初始化未完成，请稍后重试。'
     if (error.status === 409) return '内容已变化，请重新加载后再试。'
     if (error.status === 429) return `操作过于频繁，请在 ${error.retryAfter ?? '稍后'} 秒后重试。`
     if (error.status === 403) return '没有执行此操作的权限。'
@@ -17,10 +24,19 @@ function message(error: unknown) {
   return error instanceof Error ? error.message : '操作失败，请稍后重试。'
 }
 
+/**
+ * 提供异步操作包装器及忙碌、错误和成功提示状态。
+ */
 function useTask() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  /**
+   * 执行异步任务，统一维护忙碌状态、错误提示和可选成功消息。
+   *
+   * @param task 待执行的异步任务
+   * @param success 成功后展示的可选消息
+   */
   const run = async (task: () => Promise<void>, success?: string) => {
     setBusy(true); setError(''); setNotice('')
     try { await task(); if (success) setNotice(success) }
@@ -30,10 +46,16 @@ function useTask() {
   return { error, notice, busy, run, setError }
 }
 
+/**
+ * 渲染错误告警及成功状态消息，提供对应无障碍角色。
+ */
 function Feedback({ error, notice }: { error?: string; notice?: string }) {
   return <>{error ? <p className="v2-error" role="alert">{error}</p> : null}{notice ? <p className="v2-notice" role="status">{notice}</p> : null}</>
 }
 
+/**
+ * 按 mode 渲染登录或注册表单，完成后导航到团队列表或登录页。
+ */
 function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const navigate = useNavigate()
   const task = useTask()
@@ -62,6 +84,9 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   </form></main>
 }
 
+/**
+ * 渲染团队应用公共导航和当前账号，提供退出所有设备操作。
+ */
 function Shell({ children }: { children: React.ReactNode }) {
   const user = useSyncExternalStore(subscribeAuth, getAuthUser)
   const navigate = useNavigate()
@@ -75,6 +100,9 @@ function Shell({ children }: { children: React.ReactNode }) {
   </main>
 }
 
+/**
+ * 加载当前用户团队列表，并提供团队创建及导航。
+ */
 function TeamListPage() {
   const navigate = useNavigate()
   const task = useTask()
@@ -97,6 +125,9 @@ function TeamListPage() {
   </section></Shell>
 }
 
+/**
+ * 按搜索词加载可申请团队，同步当前待处理申请并提供提交或撤回。
+ */
 function DiscoverPage() {
   const task = useTask()
   const setError = task.setError
@@ -127,6 +158,9 @@ function DiscoverPage() {
   </section></Shell>
 }
 
+/**
+ * 加载当前用户站内邀请，接受后进入团队，拒绝后移除列表项。
+ */
 function InvitationsPage() {
   const navigate = useNavigate()
   const task = useTask()
@@ -154,6 +188,9 @@ function InvitationsPage() {
   </section></Shell>
 }
 
+/**
+ * 清除旧邀请链接的 hash，展示改用站内邀请的说明。
+ */
 function LegacyInvitePage() {
   useState(() => {
     if (window.location.hash) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
@@ -163,6 +200,9 @@ function LegacyInvitePage() {
   </section></main>
 }
 
+/**
+ * 加载团队、成员及项目，为所有者提供申请审批、邀请和成员管理。
+ */
 function TeamPage() {
   const teamId = Number(useParams().teamId)
   const user = useSyncExternalStore(subscribeAuth, getAuthUser)
@@ -170,7 +210,8 @@ function TeamPage() {
   const task = useTask()
   const [team, setTeam] = useState<Team | null>(null)
   const [members, setMembers] = useState<Member[]>([])
-  const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [projects, setProjects] = useState<TeamProjectSummary[]>([])
+  const [initializingId, setInitializingId] = useState<number | null>(null)
   const [requests, setRequests] = useState<JoinRequest[]>([])
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [inviteIdentifier, setInviteIdentifier] = useState('')
@@ -178,6 +219,11 @@ function TeamPage() {
   const inviteSearchVersion = useRef(0)
   const [loadError, setLoadError] = useState('')
   const isOwner = members.some(member => member.userId === user?.id && member.role === 'OWNER')
+  /**
+   * 并行加载团队基础数据，只有当前用户为所有者时才读取审批及邀请列表；取消时不写入结果。
+   *
+   * @param signal 用于取消请求的信号
+   */
   const reload = useCallback(async (signal?: AbortSignal) => {
     const [nextTeam, nextMembers, nextProjects] = await Promise.all([
       teams.getTeam(teamId, signal), teams.listMembers(teamId, signal), teams.listTeamProjects(teamId, signal),
@@ -189,6 +235,12 @@ function TeamPage() {
       if (!signal?.aborted) { setRequests(nextRequests); setInvitations(nextInvitations) }
     } else { setRequests([]); setInvitations([]) }
   }, [teamId, user?.id])
+  /**
+   * 包装团队操作，权限丢失或资源不可访问时清空团队数据并返回团队列表。
+   *
+   * @param operation 待执行的异步操作
+   * @param success 成功后展示的可选消息
+   */
   const runTeam = (operation: () => Promise<void>, success?: string) => task.run(async () => {
     try { await operation() }
     catch (error) {
@@ -216,7 +268,17 @@ function TeamPage() {
     {team ? <><div className="v2-columns"><section className="v2-panel"><h2>成员</h2><ul className="v2-list">{members.map(member => <li key={member.userId}><span>{member.displayName} <small>@{member.username} · {member.role === 'OWNER' ? '所有者' : '成员'}</small></span>
       {isOwner && member.role === 'MEMBER' ? <span className="v2-actions"><button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.transferOwner(teamId, member.userId); await reload() })}>转移所有权</button><button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.removeMember(teamId, member.userId); await reload() })}>移除</button></span> : null}</li>)}</ul>
       {!isOwner ? <button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.leaveTeam(teamId); navigate('/teams') })}>退出团队</button> : null}</section>
-      <section className="v2-panel"><h2>项目</h2><p>新项目创建将在步骤 05 完成后开放；编辑器将在步骤 07 接入。</p>
+      <section className="v2-panel"><h2>项目</h2><p>新项目包含初始文件，编辑器暂未开放。</p>
+        <form className="v2-form" onSubmit={event => {
+          event.preventDefault(); const form = new FormData(event.currentTarget)
+          void runTeam(async () => {
+            try { const project = await teams.createTeamProject(teamId, String(form.get('name')).trim()); navigate(`/teams/${teamId}/projects/${project.id}`) }
+            catch (error) { if (error instanceof ApiError && error.initializingProjectId) setInitializingId(error.initializingProjectId); throw error }
+          })
+        }}><label>项目名称<input name="name" required maxLength={100} /></label><button type="submit" disabled={task.busy}>创建项目</button></form>
+        {initializingId ? <button type="button" disabled={task.busy} onClick={() => void runTeam(async () => {
+          const project = await teams.retryTeamProjectInitialization(teamId, initializingId); navigate(`/teams/${teamId}/projects/${project.id}`)
+        })}>重试项目初始化</button> : null}
         <ul className="v2-list">{projects.map(project => <li key={project.id}><Link to={`/teams/${teamId}/projects/${project.id}`}>{project.name}</Link></li>)}</ul>
         {!projects.length ? <p>暂无项目。</p> : null}</section></div>
       {isOwner ? <div className="v2-columns"><section className="v2-panel"><h2>加入申请</h2><ul className="v2-list">{requests.map(request => <li key={request.id}><span>@{request.username}</span><span className="v2-actions"><button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.decideJoin(teamId, request.id, 'approve'); await reload() })}>批准</button><button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.decideJoin(teamId, request.id, 'reject'); await reload() })}>拒绝</button></span></li>)}</ul>{!requests.length ? <p>暂无待审批申请。</p> : null}
@@ -228,13 +290,23 @@ function TeamPage() {
   </section></Shell>
 }
 
+/**
+ * 加载团队项目元数据，提供重命名、当前文档复制和初始化重试。
+ */
 function ProjectPage() {
   const teamId = Number(useParams().teamId)
   const projectId = Number(useParams().projectId)
   const task = useTask()
   const navigate = useNavigate()
-  const [project, setProject] = useState<ProjectDetails | null>(null)
+  const [project, setProject] = useState<TeamProjectDetails | null>(null)
+  const [initializingId, setInitializingId] = useState<number | null>(null)
   const [loadError, setLoadError] = useState('')
+  /**
+   * 包装项目操作，遇到权限或资源错误时清除详情并返回团队列表。
+   *
+   * @param operation 待执行的异步操作
+   * @param success 成功后展示的可选消息
+   */
   const runProject = (operation: () => Promise<void>, success?: string) => task.run(async () => {
     try { await operation() }
     catch (error) {
@@ -256,21 +328,38 @@ function ProjectPage() {
       const name = window.prompt('新的项目名称', project.name)?.trim()
       if (name && name !== project.name) void runProject(async () => { const next = await teams.updateTeamProject(teamId, project, name); setProject({ ...project, ...next }) }, '项目已重命名。')
     }}>重命名</button><button type="button" disabled={task.busy} onClick={() => {
-      if (window.confirm(`确定删除项目“${project.name}”？`)) void runProject(async () => { await teams.deleteTeamProject(teamId, project); navigate(`/teams/${teamId}`) })
-    }}>删除</button></div></div> : null}
+      const name = window.prompt('副本名称', `${project.name} 副本`)?.trim()
+      if (name) void runProject(async () => {
+        try { const copy = await teams.copyTeamProject(teamId, project.id, name); navigate(`/teams/${teamId}/projects/${copy.id}`) }
+        catch (error) { if (error instanceof ApiError && error.initializingProjectId) setInitializingId(error.initializingProjectId); throw error }
+      })
+    }}>复制项目</button><button type="button" disabled title="项目删除暂未开放">删除</button>
+      {initializingId ? <button type="button" disabled={task.busy} onClick={() => void runProject(async () => {
+        const copy = await teams.retryTeamProjectInitialization(teamId, initializingId); navigate(`/teams/${teamId}/projects/${copy.id}`)
+      })}>重试项目初始化</button> : null}
+    </div></div> : null}
   </section></Shell>
 }
 
+/**
+ * 用团队 ID 作为组件 key，切换团队时重新建立页面状态。
+ */
 function TeamRoute() {
   const { teamId } = useParams()
   return <TeamPage key={teamId} />
 }
 
+/**
+ * 用团队与项目 ID 作为组件 key，切换项目时重新建立页面状态。
+ */
 function ProjectRoute() {
   const { teamId, projectId } = useParams()
   return <ProjectPage key={`${teamId}:${projectId}`} />
 }
 
+/**
+ * 按内存认证状态选择公开页面及团队路由，未登录访问受保护页面时跳转登录。
+ */
 function AppRoutes() {
   const user = useSyncExternalStore(subscribeAuth, getAuthUser)
   return <Routes>
@@ -286,6 +375,9 @@ function AppRoutes() {
   </Routes>
 }
 
+/**
+ * 创建浏览器路由容器并挂载团队应用路由。
+ */
 export function V2App() {
   return <BrowserRouter><AppRoutes /></BrowserRouter>
 }

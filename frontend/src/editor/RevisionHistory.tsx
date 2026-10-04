@@ -9,12 +9,25 @@ interface Props {
   onRestored: () => void
 }
 
+/**
+ * 以中文月日和时分格式显示修订创建时间。
+ *
+ * @param value 修订创建时间字符串
+ */
 const formatDate = (value: string) => new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value))
 
+/**
+ * 将字节数显示为 B 或保留一位小数的 KB。
+ *
+ * @param bytes 字节数
+ */
 const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
 
+/**
+ * 管理历史面板的加载和恢复状态，展示修订并提示恢复时的未保存风险。
+ */
 export function RevisionHistory({ projectId, currentVersion, hasUnsavedChanges, onRestored }: Props) {
   const [open, setOpen] = useState(false)
   const [revisions, setRevisions] = useState<ProjectRevision[]>([])
@@ -22,6 +35,9 @@ export function RevisionHistory({ projectId, currentVersion, hasUnsavedChanges, 
   const [restoring, setRestoring] = useState<number>()
   const [error, setError] = useState<string>()
 
+  /**
+   * 切换历史面板，打开时异步加载版本列表并更新加载或错误状态。
+   */
   const toggle = () => {
     if (open) {
       setOpen(false)
@@ -36,6 +52,11 @@ export function RevisionHistory({ projectId, currentVersion, hasUnsavedChanges, 
       .finally(() => setLoading(false))
   }
 
+  /**
+   * 确认覆盖未保存内容后按当前版本恢复历史修订，成功通知工作区重新加载。
+   *
+   * @param revision 快照修订记录
+   */
   const restore = async (revision: ProjectRevision) => {
     const warning = hasUnsavedChanges ? '当前未保存更改会被放弃。' : ''
     if (!window.confirm(`${warning}确定恢复版本 ${revision.version}？恢复操作会创建一个新版本。`)) return

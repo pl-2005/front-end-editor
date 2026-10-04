@@ -7,6 +7,11 @@ import type { ProjectDetails, ProjectFiles, ProjectSummary } from './types/proje
 
 interface OpenProject { details: ProjectDetails; files: ProjectFiles; providerKey: string; recoveredDraft: boolean; recoveryMessage?: string }
 
+/**
+ * 读取旧项目及本地草稿，仅恢复基于相同快照版本的草稿；无服务器文件时使用默认模板。
+ *
+ * @param id 项目 ID
+ */
 async function loadOpenProject(id: number): Promise<OpenProject> {
   const details = await getProject(id)
   const serverFiles = Object.keys(details.files).length ? details.files : DEFAULT_FILES
@@ -21,6 +26,9 @@ async function loadOpenProject(id: number): Promise<OpenProject> {
   }
 }
 
+/**
+ * 渲染旧快照工作区，管理项目选择、元数据操作、草稿恢复和编辑器会话。
+ */
 export function WorkspaceApp() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [opened, setOpened] = useState<OpenProject | null>(null)
@@ -28,12 +36,20 @@ export function WorkspaceApp() {
   const [error, setError] = useState<string>()
   const openRequestRef = useRef(0)
 
+  /**
+   * 刷新项目侧栏并返回最新摘要列表。
+   */
   const refreshProjects = useCallback(async () => {
     const page = await listProjects()
     setProjects(page.items)
     return page.items
   }, [])
 
+  /**
+   * 加载选定项目，以递增请求编号忽略晚到的旧加载结果。
+   *
+   * @param id 项目 ID
+   */
   const openProject = useCallback(async (id: number) => {
     const requestId = ++openRequestRef.current
     setLoading(true)
@@ -62,6 +78,9 @@ export function WorkspaceApp() {
     return () => { ignore = true }
   }, [])
 
+  /**
+   * 询问项目名称，创建成功后刷新列表并打开新项目。
+   */
   const handleCreate = async () => {
     const name = window.prompt('项目名称', '未命名项目')?.trim()
     if (!name) return
@@ -69,6 +88,11 @@ export function WorkspaceApp() {
     catch (cause) { setError(cause instanceof Error ? cause.message : '创建失败') }
   }
 
+  /**
+   * 提交新名称并同步列表及已打开项目标题；失败显示错误。
+   *
+   * @param project 项目实体或摘要
+   */
   const handleRename = async (project: ProjectSummary) => {
     const name = window.prompt('新的项目名称', project.name)?.trim()
     if (!name || name === project.name) return
@@ -79,6 +103,11 @@ export function WorkspaceApp() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '重命名失败') }
   }
 
+  /**
+   * 确认删除后刷新列表，当前项目被删除时打开剩余首个项目。
+   *
+   * @param project 项目实体或摘要
+   */
   const handleDelete = async (project: ProjectSummary) => {
     if (!window.confirm(`确定删除项目“${project.name}”？`)) return
     try {

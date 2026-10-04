@@ -1,0 +1,15 @@
+{
+  "name": "@web-editor/collaboration",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "exports": { ".": "./src/document.ts" },
+  "scripts": {
+    "build": "tsc",
+    "start": "node scripts/start.mjs",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": { "yjs": "13.6.27" },
+  "devDependencies": { "@types/node": "26.6.2", "typescript": "6.0.3" }
+}

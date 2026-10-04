@@ -23,11 +23,22 @@ public class MinioBucketInitializer implements ApplicationRunner {
     private final MinioClient minioClient;
     private final MinioProperties properties;
 
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param minioClient MinIO 客户端
+     * @param properties MinIO 存储配置
+     */
     public MinioBucketInitializer(MinioClient minioClient, MinioProperties properties) {
         this.minioClient = minioClient;
         this.properties = properties;
     }
 
+    /**
+     * 应用启动时检查配置的 MinIO 桶，不存在则创建；失败向启动流程传播。
+     *
+     * @param args 启动参数
+     */
     @Override
     public void run(ApplicationArguments args) throws Exception {
         String bucket = properties.bucket();
@@ -40,4 +51,3 @@ public class MinioBucketInitializer implements ApplicationRunner {
         }
     }
 }
-

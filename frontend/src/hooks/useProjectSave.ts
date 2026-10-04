@@ -14,8 +14,18 @@ interface Options {
   initiallyDirty?: boolean
 }
 
+/**
+ * 序列化入口和文件内容，生成判断本地改动的比较值。
+ *
+ * @param entry 入口文件绝对路径
+ * @param files 文件集合
+ */
 const fingerprint = (entry: string, files: ProjectFiles) => JSON.stringify({ entry, files })
 
+/**
+ * 维护保存状态和快照版本，持久化本地草稿，并提供串行自动保存、快捷键及联网重试。
+ * @returns 保存状态、展示消息及手动保存函数
+ */
 export function useProjectSave({ projectId, initialVersion, entry, files, onVersionChange, initiallyDirty = false }: Options) {
   const [status, setStatus] = useState<SaveStatus>('saved')
   const [message, setMessage] = useState('所有更改均已保存')
@@ -36,6 +46,9 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
     void putDraft({ projectId, baseVersion: versionRef.current, entry, files, updatedAt: Date.now() })
   }, [entry, files, projectId])
 
+  /**
+   * 串行提交最新快照并合并保存期间的新改动；成功更新版本并处理草稿，冲突时停止后续自动提交。
+   */
   const save = useCallback(async () => {
     if (savingRef.current) {
       pendingSaveRef.current = true
@@ -90,9 +103,17 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
   }, [files, save, status])
 
   useEffect(() => {
+    /**
+     * 拦截 Ctrl/Cmd+S，阻止浏览器保存页面并触发项目保存。
+     *
+     * @param event 浏览器输入事件
+     */
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save() }
     }
+    /**
+     * 网络恢复时尝试保存尚未提交的项目更改。
+     */
     const handleOnline = () => void save()
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('online', handleOnline)

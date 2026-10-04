@@ -4,6 +4,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 public final class ProjectRequests {
+    /**
+     * 禁止外部实例化此工具类。
+     */
     private ProjectRequests() {
     }
 

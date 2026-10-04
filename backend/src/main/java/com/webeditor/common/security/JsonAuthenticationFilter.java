@@ -26,13 +26,33 @@ public class JsonAuthenticationFilter extends OncePerRequestFilter {
     private final AuthRateLimiter limiter;
     private final SecurityErrors errors;
     private final ObjectMapper mapper;
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param manager 用户名密码认证管理器
+     * @param limiter 认证及公共接口限流器
+     * @param errors 统一认证错误写入器
+     * @param mapper JSON 序列化器
+     */
     public JsonAuthenticationFilter(AuthenticationManager manager, AuthRateLimiter limiter,
             SecurityErrors errors, ObjectMapper mapper) {
         this.manager = manager; this.limiter = limiter; this.errors = errors; this.mapper = mapper;
     }
+    /**
+     * 仅拦截 POST 登录请求，其他请求跳过 JSON 登录认证。
+     *
+     * @param request 当前 HTTP 请求
+     */
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
         return !request.getMethod().equals("POST") || !request.getRequestURI().equals("/api/auth/login");
     }
+    /**
+     * 校验登录 JSON 和请求大小，执行限流及认证，返回凭据或统一错误，最后清理安全上下文。
+     *
+     * @param request 当前 HTTP 请求
+     * @param response HTTP 响应
+     * @param chain 后续过滤器链
+     */
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         response.setHeader("Cache-Control", "no-store");

@@ -23,12 +23,28 @@ public class TeamService {
     private final AppUserRepository users;
     private final TeamAccessService access;
     private final EntityManager entityManager;
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param teams 团队仓储或服务
+     * @param members 团队成员仓储
+     * @param invitations 团队邀请仓储
+     * @param requests 团队加入申请仓储
+     * @param users 用户仓储
+     * @param access 团队及项目权限校验服务
+     * @param entityManager JPA 实体管理器
+     */
     public TeamService(TeamRepository teams, TeamMemberRepository members, TeamInvitationRepository invitations,
             TeamJoinRequestRepository requests, AppUserRepository users, TeamAccessService access, EntityManager entityManager) {
         this.teams = teams; this.members = members; this.invitations = invitations;
         this.requests = requests; this.users = users; this.access = access; this.entityManager = entityManager;
     }
     public record TeamView(long id, String name, String description, String joinPolicy) {
+        /**
+         * 将团队实体转换为包含公开元数据及加入策略的视图。
+         *
+         * @param t 团队实体
+         */
         static TeamView of(Team t) { return new TeamView(t.getId(), t.getName(), t.getDescription(), t.getJoinPolicy()); }
     }
     public record MemberView(long userId, String username, String displayName, String role) {}
@@ -38,6 +54,13 @@ public class TeamService {
     public record InvitationView(long id, Long inviteeUserId, String username, String email, String status, Instant expiresAt) {}
     public record MyInvitationView(long id, long teamId, String teamName, Instant expiresAt) {}
 
+    /**
+     * 校验用户后创建团队和 OWNER 成员记录，并更新创建者授权版本。
+     *
+     * @param userId 用户 ID
+     * @param name 名称
+     * @param description 描述，允许为空
+     */
     @Transactional
     public TeamView create(long userId, String name, String description) {
         requireUser(userId);
@@ -46,20 +69,47 @@ public class TeamService {
         bump(userId);
         return TeamView.of(team);
     }
+    /**
+     * 分页查询当前用户作为有效成员加入的有效团队。
+     *
+     * @param userId 用户 ID
+     * @param page 从 0 开始的页码
+     * @param size 每页记录数
+     */
     @Transactional(readOnly = true)
     public Page<TeamView> mine(long userId, int page, int size) {
         requireUser(userId);
         return teams.mine(userId, PageRequest.of(page, size)).map(TeamView::of);
     }
+    /**
+     * 按名称分页搜索有效且允许申请加入的团队。
+     *
+     * @param query 名称搜索词
+     * @param page 从 0 开始的页码
+     * @param size 每页记录数
+     */
     @Transactional(readOnly = true)
     public Page<TeamView> discover(String query, int page, int size) {
         return teams.discover(query.trim(), PageRequest.of(page, size)).map(TeamView::of);
     }
+    /**
+     * 验证成员权限后读取团队公开详情。
+     *
+     * @param teamId 团队 ID
+     *
+     * @param userId 用户 ID
+     */
     @Transactional(readOnly = true)
     public TeamView get(long teamId, long userId) {
         access.member(teamId, userId);
         return TeamView.of(teams.findById(teamId).orElseThrow());
     }
+    /**
+     * 验证成员权限后查询有效成员，并补充用户公开资料。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     */
     @Transactional(readOnly = true)
     public List<MemberView> members(long teamId, long userId) {
         access.member(teamId, userId);
@@ -68,6 +118,13 @@ public class TeamService {
             return new MemberView(u.getId(), u.getUsername(), u.getDisplayName(), m.getRole());
         }).toList();
     }
+    /**
+     * 锁定团队并验证所有者身份，更新经过校验的加入策略。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     * @param policy 加入策略
+     */
     @Transactional
     public TeamView policy(long teamId, long userId, String policy) {
         Team team = lockTeam(teamId);
@@ -76,6 +133,12 @@ public class TeamService {
         team.setJoinPolicy(policy);
         return TeamView.of(team);
     }
+    /**
+     * 在团队锁内检查加入策略和成员状态，新建或重新开启加入申请；待处理申请直接复用。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     */
     @Transactional
     public RequestView request(long teamId, long userId) {
         Team team = lockTeam(teamId);
@@ -88,12 +151,23 @@ public class TeamService {
         else if (!"PENDING".equals(request.getStatus())) request.reopen();
         return view(requests.saveAndFlush(request));
     }
+    /**
+     * 读取指定用户当前待处理的加入申请。
+     *
+     * @param userId 用户 ID
+     */
     @Transactional(readOnly = true)
     public List<MyRequestView> myPendingRequests(long userId) {
         requireUser(userId);
         return requests.findByUserIdAndStatusOrderByCreatedAt(userId, "PENDING").stream()
                 .map(r -> new MyRequestView(r.getId(), r.getTeamId(), r.getStatus(), r.getCreatedAt())).toList();
     }
+    /**
+     * 锁定团队后将当前用户待处理申请标记为已撤回。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     */
     @Transactional
     public void withdraw(long teamId, long userId) {
         lockTeam(teamId);
@@ -102,11 +176,25 @@ public class TeamService {
                 .orElseThrow(() -> new TeamFailure(404, "JOIN_REQUEST_NOT_FOUND", "申请不存在"));
         request.resolve("WITHDRAWN");
     }
+    /**
+     * 要求团队所有者权限，读取按创建时间排序的待审批申请。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     */
     @Transactional(readOnly = true)
     public List<RequestView> pending(long teamId, long userId) {
         access.owner(teamId, userId);
         return requests.findByTeamIdAndStatusOrderByCreatedAt(teamId, "PENDING").stream().map(this::view).toList();
     }
+    /**
+     * 锁定团队并校验所有者权限，批准时检查加入策略并激活成员，再记录审批结果。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     * @param requestId 加入申请 ID
+     * @param approve 是否批准加入申请
+     */
     @Transactional
     public void decide(long teamId, long userId, long requestId, boolean approve) {
         Team team = lockTeam(teamId);
@@ -121,6 +209,13 @@ public class TeamService {
         }
         request.resolve(approve ? "APPROVED" : "REJECTED");
     }
+    /**
+     * 要求团队所有者权限，按账号查找已注册用户并拒绝已在团队中的成员。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     * @param identifier 用户名或邮箱
+     */
     @Transactional(readOnly = true)
     public InviteeView lookupInvitee(long teamId, long userId, String identifier) {
         access.owner(teamId, userId);
@@ -129,6 +224,11 @@ public class TeamService {
             throw conflict("用户已是团队成员");
         return new InviteeView(target.getId(), target.getUsername(), target.getDisplayName());
     }
+    /**
+     * 规范化用户名或邮箱后查找已注册用户，未找到时返回 USER_NOT_FOUND。
+     *
+     * @param identifier 用户名或邮箱
+     */
     private AppUser findInvitee(String identifier) {
         boolean byEmail = identifier != null && identifier.contains("@");
         String normalized = IdentityInput.normalize(identifier, byEmail ? 254 : 50);
@@ -137,6 +237,13 @@ public class TeamService {
         return (byEmail ? users.findByNormalizedEmail(normalized) : users.findByNormalizedUsername(normalized))
                 .orElseThrow(() -> new TeamFailure(404, "USER_NOT_FOUND", "未找到对应的已注册用户"));
     }
+    /**
+     * 在团队锁内由所有者邀请已注册用户，拒绝现有成员及重复有效邀请，并设置七天有效期。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     * @param inviteeUserId 受邀用户 ID
+     */
     @Transactional
     public InvitationView invite(long teamId, long userId, long inviteeUserId) {
         lockTeam(teamId);
@@ -155,11 +262,22 @@ public class TeamService {
                 target.getId(), email, Instant.now().plus(7, ChronoUnit.DAYS)));
         return invitationView(invitation);
     }
+    /**
+     * 要求所有者权限，按 ID 倒序返回团队邀请记录。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     */
     @Transactional(readOnly = true)
     public List<InvitationView> invitations(long teamId, long userId) {
         access.owner(teamId, userId);
         return invitations.findByTeamIdOrderByIdDesc(teamId).stream().map(this::invitationView).toList();
     }
+    /**
+     * 返回发给指定用户、仍可使用且所属团队有效的邀请。
+     *
+     * @param userId 用户 ID
+     */
     @Transactional(readOnly = true)
     public List<MyInvitationView> myInvitations(long userId) {
         requireUser(userId);
@@ -170,6 +288,13 @@ public class TeamService {
                         .map(team -> new MyInvitationView(invitation.getId(), team.getId(), team.getName(), invitation.getExpiresAt())))
                 .toList();
     }
+    /**
+     * 在团队锁内验证所有者及邀请有效性，再撤销指定邀请。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     * @param invitationId 邀请 ID
+     */
     @Transactional
     public void revokeInvitation(long teamId, long userId, long invitationId) {
         lockTeam(teamId);
@@ -179,6 +304,12 @@ public class TeamService {
         if (!invitation.usable()) throw gone();
         invitation.revoke();
     }
+    /**
+     * 锁定邀请所属团队并刷新邀请状态，核对受邀人和有效期后激活成员并消费邀请。
+     *
+     * @param userId 用户 ID
+     * @param invitationId 邀请 ID
+     */
     @Transactional
     public TeamView accept(long userId, long invitationId) {
         AppUser user = requireUser(userId);
@@ -191,6 +322,12 @@ public class TeamService {
         invitation.consume();
         return TeamView.of(team);
     }
+    /**
+     * 锁定团队并刷新邀请状态，确认受邀人及有效期后拒绝邀请。
+     *
+     * @param userId 用户 ID
+     * @param invitationId 邀请 ID
+     */
     @Transactional
     public void rejectInvitation(long userId, long invitationId) {
         AppUser user = requireUser(userId);
@@ -200,6 +337,12 @@ public class TeamService {
         if (!invitation.usable() || !addressedTo(invitation, user)) throw gone();
         invitation.reject();
     }
+    /**
+     * 锁定团队后移除当前成员并更新授权版本；所有者必须先转移所有权。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     */
     @Transactional
     public void leave(long teamId, long userId) {
         lockTeam(teamId);
@@ -207,6 +350,13 @@ public class TeamService {
         if ("OWNER".equals(member.getRole())) throw conflict("请先转移团队所有权");
         member.remove(); bump(userId);
     }
+    /**
+     * 要求所有者权限，在团队锁内移除普通成员并更新其授权版本。
+     *
+     * @param teamId 团队 ID
+     * @param ownerId 当前所有者用户 ID
+     * @param memberId 待移除成员用户 ID
+     */
     @Transactional
     public void remove(long teamId, long ownerId, long memberId) {
         lockTeam(teamId);
@@ -215,6 +365,13 @@ public class TeamService {
         if ("OWNER".equals(member.getRole())) throw conflict("不能移除当前所有者");
         member.remove(); bump(memberId);
     }
+    /**
+     * 在团队锁内将所有权转交给另一有效成员，先刷新旧所有者角色，再更新双方授权版本。
+     *
+     * @param teamId 团队 ID
+     * @param ownerId 当前所有者用户 ID
+     * @param nextOwnerId 接任所有者用户 ID
+     */
     @Transactional
     public void transfer(long teamId, long ownerId, long nextOwnerId) {
         lockTeam(teamId);
@@ -224,9 +381,20 @@ public class TeamService {
         owner.transferTo("MEMBER"); members.flush(); next.transferTo("OWNER");
         bump(ownerId); bump(nextOwnerId);
     }
+    /**
+     * 以悲观写锁读取有效团队，不存在时返回 404。
+     *
+     * @param teamId 团队 ID
+     */
     private Team lockTeam(long teamId) {
         return teams.lockActive(teamId).orElseThrow(() -> new TeamFailure(404, "TEAM_NOT_FOUND", "团队不存在"));
     }
+    /**
+     * 新建或恢复普通成员关系，撤销该用户在团队内的待处理邀请，并更新授权版本。
+     *
+     * @param teamId 团队 ID
+     * @param userId 用户 ID
+     */
     private void activate(long teamId, long userId) {
         requireUser(userId);
         TeamMember old = members.findByTeamIdAndUserId(teamId, userId).orElse(null);
@@ -237,16 +405,36 @@ public class TeamService {
                 .forEach(TeamInvitation::revoke);
         bump(userId);
     }
+    /**
+     * 原子递增用户授权版本，用户不存在时返回 404。
+     *
+     * @param userId 用户 ID
+     */
     private void bump(long userId) {
         if (users.incrementAuthzVersion(userId) != 1) throw new TeamFailure(404, "USER_NOT_FOUND", "用户不存在");
     }
+    /**
+     * 查询用户实体，不存在时抛出 USER_NOT_FOUND。
+     *
+     * @param id 用户 ID
+     */
     private AppUser requireUser(long id) {
         return users.findById(id).orElseThrow(() -> new TeamFailure(404, "USER_NOT_FOUND", "用户不存在"));
     }
+    /**
+     * 将加入申请与申请人用户名组合为申请视图。
+     *
+     * @param request 加入申请实体
+     */
     private RequestView view(TeamJoinRequest request) {
         AppUser user = requireUser(request.getUserId());
         return new RequestView(request.getId(), user.getId(), user.getUsername(), request.getStatus(), request.getCreatedAt());
     }
+    /**
+     * 组合邀请及受邀人资料；用户不存在时保留邀请并将用户名置空。
+     *
+     * @param invitation 邀请实体
+     */
     private InvitationView invitationView(TeamInvitation invitation) {
         AppUser user = invitation.getInviteeUserId() == null ? null
                 : users.findById(invitation.getInviteeUserId()).orElse(null);
@@ -254,10 +442,29 @@ public class TeamService {
                 user == null ? null : user.getUsername(), invitation.getEmailNormalized(),
                 invitation.getStatus(), invitation.getExpiresAt());
     }
+    /**
+     * 按受邀用户 ID 判断邀请是否发给当前用户。
+     *
+     * @param invitation 邀请实体
+     * @param user 用户实体
+     */
     private static boolean addressedTo(TeamInvitation invitation, AppUser user) {
         return invitation.getInviteeUserId() != null && invitation.getInviteeUserId().equals(user.getId());
     }
+    /**
+     * 去除首尾空白，将空文本统一为 null。
+     *
+     * @param value 待规范化或处理的文本
+     */
     private static String trim(String value) { return value == null || value.isBlank() ? null : value.trim(); }
+    /**
+     * 创建携带业务说明的 409 团队状态冲突异常。
+     *
+     * @param message 错误或业务说明
+     */
     private static TeamFailure conflict(String message) { return new TeamFailure(409, "TEAM_STATE_CONFLICT", message); }
+    /**
+     * 创建邀请无效或过期对应的 410 异常。
+     */
     private static TeamFailure gone() { return new TeamFailure(410, "INVITATION_GONE", "邀请无效或已过期"); }
 }

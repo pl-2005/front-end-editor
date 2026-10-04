@@ -18,16 +18,31 @@ import com.webeditor.identity.application.AuthService;
 
 @Configuration
 public class SecurityConfig {
+    /**
+     * 禁用 JWT 过滤器的 Servlet 自动注册，使其只在安全过滤链中执行。
+     *
+     * @param filter 待关闭 Servlet 自动注册的安全过滤器
+     */
     @Bean FilterRegistrationBean<JwtAuthenticationFilter> jwtFilterRegistration(JwtAuthenticationFilter filter) {
         FilterRegistrationBean<JwtAuthenticationFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;
     }
+    /**
+     * 禁用 JSON 登录过滤器的 Servlet 自动注册，避免在安全过滤链外重复执行。
+     *
+     * @param filter 待关闭 Servlet 自动注册的安全过滤器
+     */
     @Bean FilterRegistrationBean<JsonAuthenticationFilter> jsonAuthenticationFilterRegistration(JsonAuthenticationFilter filter) {
         FilterRegistrationBean<JsonAuthenticationFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;
     }
+    /**
+     * 将用户名密码认证委托给认证服务，并将 401 故障转换为 Spring 凭据错误。
+     *
+     * @param auth 认证服务
+     */
     @Bean AuthenticationManager authenticationManager(AuthService auth) {
         return authentication -> {
             try {
@@ -39,7 +54,18 @@ public class SecurityConfig {
             }
         };
     }
+    /**
+     * 创建带算法标识的委托密码编码器，兼容已有摘要并支持升级。
+     */
     @Bean PasswordEncoder passwordEncoder() { return PasswordEncoderFactories.createDelegatingPasswordEncoder(); }
+    /**
+     * 配置无状态安全链、公开接口和统一错误处理；旧项目 API 禁用，内部协作接口由控制器单独验证 HMAC。
+     *
+     * @param http 安全过滤链配置器
+     * @param jwt JWT 认证过滤器
+     * @param json JSON 登录过滤器
+     * @param errors 统一认证错误写入器
+     */
     @Bean SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwt,
             JsonAuthenticationFilter json, SecurityErrors errors) throws Exception {
         http.csrf(csrf -> csrf.disable()).cors(cors -> cors.disable())
@@ -52,6 +78,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/health", "/api/health/readiness", "/api/teams/discover").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
+                        // The internal controller authenticates bounded raw bodies with its separate HMAC key.
+                        .requestMatchers("/internal/collaboration/projects/**").permitAll()
                         .requestMatchers("/api/projects", "/api/projects/**").denyAll()
                         .requestMatchers("/api/**").authenticated().anyRequest().denyAll())
                 .addFilterBefore(jwt, AnonymousAuthenticationFilter.class)

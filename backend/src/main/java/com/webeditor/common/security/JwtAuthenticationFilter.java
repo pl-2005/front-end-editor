@@ -24,11 +24,25 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final AppUserRepository users;
     private final SecurityErrors errors;
     private final String issuer, audience;
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param decoder JWT 签名解码器
+     * @param users 用户仓储
+     * @param errors 统一认证错误写入器
+     * @param issuer JWT 签发方
+     * @param audience 内部请求或令牌的受众标识
+     */
     public JwtAuthenticationFilter(JwtDecoder decoder, AppUserRepository users, SecurityErrors errors,
             @Value("${editor.auth.issuer}") String issuer, @Value("${editor.auth.audience}") String audience) {
         this.decoder = decoder; this.users = users; this.errors = errors;
         this.issuer = issuer; this.audience = audience;
     }
+    /**
+     * 跳过非 API、预检及公开接口，其余 API 请求必须验证访问令牌。
+     *
+     * @param request 当前 HTTP 请求
+     */
     @Override protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         String method = request.getMethod();
@@ -36,6 +50,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 || "POST".equals(method) && (path.equals("/api/auth/register") || path.equals("/api/auth/login") || path.equals("/api/auth/refresh"))
                 || "GET".equals(method) && (path.equals("/api/health") || path.equals("/api/health/readiness") || path.equals("/api/teams/discover"));
     }
+    /**
+     * 验证唯一 Bearer 令牌、JWT 声明和用户令牌版本，设置用户主体供后续处理，并在结束时清理上下文。
+     *
+     * @param request 当前 HTTP 请求
+     * @param response HTTP 响应
+     * @param chain 后续过滤器链
+     */
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         Long authenticatedId;

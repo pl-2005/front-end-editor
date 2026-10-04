@@ -20,12 +20,27 @@ public class OrphanSnapshotCleaner {
     private final Duration gracePeriod;
     private final Clock clock;
 
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param storage 对象存储接口
+     * @param revisions 快照修订仓储
+     * @param gracePeriod 旧快照清理宽限期
+     */
     @Autowired
     public OrphanSnapshotCleaner(SnapshotStorage storage, ProjectRevisionRepository revisions,
                                  @Value("${editor.storage.orphan-cleanup.grace-period:24h}") Duration gracePeriod) {
         this(storage, revisions, gracePeriod, Clock.systemUTC());
     }
 
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param storage 对象存储接口
+     * @param revisions 快照修订仓储
+     * @param gracePeriod 旧快照清理宽限期
+     * @param clock 用于获取清理时间的时钟
+     */
     OrphanSnapshotCleaner(SnapshotStorage storage, ProjectRevisionRepository revisions,
                           Duration gracePeriod, Clock clock) {
         this.storage = storage;
@@ -34,6 +49,9 @@ public class OrphanSnapshotCleaner {
         this.clock = clock;
     }
 
+    /**
+     * 扫描旧快照命名空间，删除超过宽限期且无修订引用的对象；单个删除失败记录日志后继续。
+     */
     @Scheduled(cron = "${editor.storage.orphan-cleanup.cron:0 30 3 * * *}")
     public void clean() {
         Instant cutoff = clock.instant().minus(gracePeriod);

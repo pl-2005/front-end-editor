@@ -1,6 +1,18 @@
 # 步骤 05：Y.Doc 初始文件与当前状态持久化
 
-> 前置：步骤 01、03、04。状态：未开始。目标：新项目无需 revision 即有可恢复的权威文件状态。
+> 前置：步骤 01、03、04。状态：已实现并完成自动检查和本机功能验收（2026-10-04）。目标：新项目无需 revision 即有可恢复的权威文件状态。
+
+## 实现记录
+
+追加 V10 迁移，新增 `collab_document`、持久化幂等回执、对象租约/清理 guard、备份引用表；项目状态扩展为 INITIALIZING。`collaboration/` 提供共享 TypeScript Y.Doc schema/编码模块及仅监听 loopback 的 HMAC 初始化服务。Spring 实现模板初始化、不可见失败记录重试、当前指针复制、describe/load/persist，以及事务外 MinIO I/O 和 generation CAS。
+
+团队 UI 接入创建、复制和初始化重试，所有有效成员同权；V2 项目响应不暴露旧 version、JSON files 或 MinIO 对象键。V1 snapshot/revision/restore 对协作项目关闭，删除仍等待 Step09。创建默认受 `COLLAB_CREATION_ENABLED=false` 控制，仅受控验收打开，公开入口留给 Step11。
+
+自动检查：后端 36 个测试、前端 lint/43 个测试/生产构建、协作模块 4 个测试通过。故障测试覆盖对象上传失败和数据库提交失败不产生可见空项目；并发测试覆盖两个 persist 仅一个切换指针，幂等回执可跨后续保存重放；清理测试覆盖当前文档、上传租约、有效备份和恢复保护窗口。
+
+本机功能验收使用根 `.env` 的 MySQL/MinIO/Redis，无 Docker。V10 已执行，真实创建与复制均生成哈希和大小匹配的 Y.Doc；CAS 竞争、幂等重试、epoch 拒绝、旧入口隔离通过，后端重启后恢复当前指针并解码二进制通过。临时后端与编码服务已停止，验收数据保留在本机。运行和内部协议见 [协作模块说明](../../../collaboration/README.md)。初始 nonce 缓存为单进程内存，Step06 将补全持久化 nonce 与双向协议；完整备份编排留给 Step10。
+
+真实 MySQL 验收发现 JDBC Map 对 DATETIME 返回 LocalDateTime，与 H2 的 Timestamp 不同；对象 guard 已改为 ResultSet 显式读取时间并转换 Instant，修复后重新执行本机流程和后端测试。
 
 ## 数据模型
 

@@ -18,11 +18,23 @@ public class MinioSnapshotStorage implements SnapshotStorage {
     private final MinioClient client;
     private final MinioProperties properties;
 
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param client MinIO 客户端
+     * @param properties MinIO 存储配置
+     */
     public MinioSnapshotStorage(MinioClient client, MinioProperties properties) {
         this.client = client;
         this.properties = properties;
     }
 
+    /**
+     * 将 gzip 快照上传到配置的 MinIO 桶，上传失败转换为存储异常。
+     *
+     * @param objectKey 存储对象键
+     * @param content 待存储内容
+     */
     @Override
     public void put(String objectKey, byte[] content) {
         try (var input = new ByteArrayInputStream(content)) {
@@ -37,6 +49,11 @@ public class MinioSnapshotStorage implements SnapshotStorage {
         }
     }
 
+    /**
+     * 流式读取快照对象并限制压缩内容不超过 12 MiB。
+     *
+     * @param objectKey 存储对象键
+     */
     @Override
     public byte[] get(String objectKey) {
         try (var input = client.getObject(GetObjectArgs.builder()
@@ -60,6 +77,11 @@ public class MinioSnapshotStorage implements SnapshotStorage {
         }
     }
 
+    /**
+     * 删除指定快照对象，存储失败转换为存储异常。
+     *
+     * @param objectKey 存储对象键
+     */
     @Override
     public void delete(String objectKey) {
         try {
@@ -72,6 +94,11 @@ public class MinioSnapshotStorage implements SnapshotStorage {
         }
     }
 
+    /**
+     * 递归列出给定前缀下的快照对象及最后修改时间。
+     *
+     * @param prefix 存储对象前缀
+     */
     @Override
     public List<StoredObject> list(String prefix) {
         try {

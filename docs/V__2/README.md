@@ -23,8 +23,10 @@
 | --- | --- | --- |
 | 01 | 已完成（2026-09-28） | [现状与并发、存储护栏](./steps/01-baseline-guardrails.md) |
 | 02 | 已实现 | [身份、JWT 与刷新凭据](./steps/02-identity-jwt.md) |
-| 03 | 团队后端已实现（2026-09-29） | [团队成员授权、加入流程与旧项目隔离](./steps/03-team-invite-project-acl.md)；项目创建待 05 |
-| 04–11 | 未开始 | — |
+| 03 | 团队后端已实现（2026-09-29） | [团队成员授权、加入流程与旧项目隔离](./steps/03-team-invite-project-acl.md)；项目创建由 05 接入 |
+| 04 | 已实现并完成自动检查及本机流程验收 | [前端身份与团队界面](./steps/04-frontend-auth-team-permission-shell.md) |
+| 05 | 已实现并完成自动检查及本机功能验收（2026-10-04） | [Y.Doc 初始文件与当前状态持久化](./steps/05-collaboration-state-storage-foundation.md) |
+| 06–11 | 未开始 | — |
 
 首期部署与验收采用单网关实例；步骤 09 完成前生产协作开关保持关闭。
 

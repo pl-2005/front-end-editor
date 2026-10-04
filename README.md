@@ -2,7 +2,7 @@
 
 一个面向 HTML、CSS 和 JavaScript 的浏览器在线编辑器。编辑与预览由 React、Vite 和 Sandpack 在浏览器中完成；Spring Boot 提供项目和版本管理 API，MySQL 保存元数据，MinIO 保存不可变的压缩文件快照。
 
-> V2 身份认证已进入开发阶段。当前代码强制 Bearer 认证并隔离 V1 匿名项目，团队授权与新项目流程将在后续步骤接入；本页其余项目/版本说明记录的是 V1 功能，不代表当前 V2 代码已可公开切换。V2 实施顺序见 [docs/V__2/README.md](docs/V__2/README.md)。
+> V2 已实现身份认证、团队授权和 Step05 协作存储底座。当前代码强制 Bearer 认证并隔离 V1 匿名项目；受控新项目直接初始化并持久化 Y.Doc，创建、复制和初始化重试说明见 [collaboration/README.md](collaboration/README.md)。协作网关、编辑器接入与删除协调仍待后续步骤。本页其余项目/版本说明记录的是 V1 功能，不代表当前 V2 代码已可公开切换。V2 实施顺序见 [docs/V__2/README.md](docs/V__2/README.md)。
 
 ## 已实现功能
 

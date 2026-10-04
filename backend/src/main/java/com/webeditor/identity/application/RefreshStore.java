@@ -22,14 +22,36 @@ public class RefreshStore {
     private final String namespace;
     private final Duration idle, maximum;
     private final int maxFamilies;
+    /**
+     * 初始化组件依赖及配置，供后续业务方法使用。
+     *
+     * @param redis Redis 数据访问模板
+     * @param namespace Redis 键命名空间
+     * @param idle 刷新令牌空闲超时
+     * @param maximum 令牌族最长生命周期
+     * @param maxFamilies 每个用户允许的令牌族数
+     */
     public RefreshStore(StringRedisTemplate redis, @Value("${editor.auth.redis-namespace}") String namespace,
             @Value("${editor.auth.refresh-idle-timeout}") Duration idle,
             @Value("${editor.auth.refresh-max-lifetime}") Duration maximum,
             @Value("${editor.auth.max-refresh-families-per-user}") int maxFamilies) {
         this.redis = redis; this.namespace = namespace; this.idle = idle; this.maximum = maximum; this.maxFamilies = maxFamilies;
     }
+    /**
+     * 为刷新令牌相关 Redis 键添加配置的命名空间。
+     *
+     * @param part Redis 键的业务部分
+     */
     private String key(String part) { return namespace + ":" + part; }
+    /**
+     * 生成 32 字节安全随机数并编码为无填充的 URL 安全刷新令牌。
+     */
     private static String random() { byte[] bytes = new byte[32]; RANDOM.nextBytes(bytes); return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes); }
+    /**
+     * 计算令牌的 SHA-256 十六进制摘要，供 Redis 索引使用。
+     *
+     * @param value 刷新令牌明文
+     */
     private static String digest(String value) {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (Exception e) { throw new IllegalStateException(e); }
@@ -47,6 +69,13 @@ public class RefreshStore {
         redis.call('PSETEX', KEYS[3], ttl, ARGV[6])
         return 1
         """, Long.class);
+    /**
+     * 创建令牌族和首个刷新令牌，设置空闲与最长生命周期，并淘汰超过上限的旧令牌族。
+     *
+     * @param userId 用户 ID
+     * @param version 版本号
+     * @return 随机刷新令牌明文，Redis 仅以摘要索引
+     */
     public String create(long userId, long version) {
         String family = UUID.randomUUID().toString();
         String value = userId + ":" + version + ":" + family;
@@ -64,6 +93,12 @@ public class RefreshStore {
         return token;
     }
     public record Rotated(String token, RefreshUser user) {}
+    /**
+     * 用 Lua 原子将旧令牌标记已用并签发下一令牌；重放已用令牌会撤销整个令牌族。
+     *
+     * @param oldToken 待轮换的刷新令牌
+     * @return 新刷新令牌及关联用户和令牌版本
+     */
     public Rotated rotate(String oldToken) {
         if (oldToken == null || !oldToken.matches("[A-Za-z0-9_-]{43}")) throw new AuthFailure(401, "AUTHENTICATION_REQUIRED");
         String oldKey = key("token:" + digest(oldToken));
