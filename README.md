@@ -1,8 +1,8 @@
 # Web Editor
 
-一个面向 HTML、CSS 和 JavaScript 的浏览器在线编辑器。V2 使用 Spring Boot 管理身份、团队授权和项目元数据，Hocuspocus 网关负责 Yjs 协作与自动持久化，MySQL 保存当前文档指针，MinIO 保存 Y.Doc 二进制。正式 Monaco/Yjs/Sandpack 编辑器接入仍待 Step07。
+一个面向 HTML、CSS 和 JavaScript 的浏览器在线编辑器。V2 使用 Spring Boot 管理身份、团队授权和项目元数据，Hocuspocus 网关负责 Yjs 协作与自动持久化，MySQL 保存当前文档指针，MinIO 保存 Y.Doc 二进制。项目工作区使用 Monaco 编辑 Y.Text，Sandpack 单向派生预览和控制台。
 
-> V2 已完成 Step06：身份认证、团队授权、Y.Doc 存储底座、单次协作票据、安全网关和自动持久化。当前代码强制 Bearer 认证并隔离 V1 匿名项目；受控新项目直接初始化 Y.Doc，协作启用后的项目复制先 flush 最新编辑。启动、内部协议与本机验收见 [collaboration/README.md](collaboration/README.md)。票据与网关开关默认关闭；正式编辑器、离线日志、删除与主动撤权协调分别由 Step07–09 完成，公开入口在 Step11 开放。完整进度见 [docs/V__2/README.md](docs/V__2/README.md)。
+> V2 已完成 Step07：身份认证、团队授权、Y.Doc 存储、安全网关、自动持久化及 Monaco/Yjs/Sandpack 工作区。支持多文件编辑、HTML/CSS/JS 补全与诊断、文本撤销重做及同步/持久化状态确认。启动、内部协议与本机验收见 [collaboration/README.md](collaboration/README.md)。票据与网关开关默认关闭；离线日志与 Presence 留给 Step08，删除与主动撤权协调留给 Step09，公开入口在 Step11 开放。完整进度见 [docs/V__2/README.md](docs/V__2/README.md)。
 
 ## V1 功能记录
 
@@ -15,7 +15,7 @@
 - 版本历史：查看历史快照，并将任一历史内容恢复为一个新版本；
 - 存储维护：启动时初始化 MinIO Bucket，并定时清理无数据库引用的孤立快照。
 
-上述保存、草稿、版本历史和软删除流程记录 V1 行为。V2 不开放旧快照写入和版本历史接口，协作项目删除等待 Step09；当前前端尚未接入 Step06 网关。项目不支持 npm 依赖管理、服务端代码执行或 Git 集成。
+上述保存、草稿、版本历史和软删除流程记录 V1 行为。V2 通过协作网关自动保存当前 Y.Doc，不开放旧快照写入和版本历史接口；断线暂时只读，离线日志等待 Step08，协作项目删除等待 Step09。项目不支持 npm 依赖管理、服务端代码执行或 Git 集成。
 
 ## 技术栈
 
@@ -87,9 +87,26 @@ npm run dev
 
 访问 `http://localhost:5173`。Vite 会将 `/api` 请求代理到 `http://localhost:8080`。
 
+### 4. 启动本机协作编辑服务
+
+V2 编辑器必须连接协作网关才能加载文件。仅启动前后端会显示“协作编辑暂未开放”或连接失败。在根 `.env` 中设置 `COLLAB_TICKET_ENABLED=true`、`COLLAB_GATEWAY_ENABLED=true`，填写独立且至少 32 字节的 `COLLAB_GATEWAY_SECRET`，并设置 `COLLAB_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`。与已有 storage/initializer 密钥保持区分；修改后重启后端。
+
+在另外两个终端启动初始化服务和网关（已运行的服务无需重复启动）：
+
+```powershell
+cd collaboration
+npm ci
+npm run build
+npm start
+# 另一个终端，仍在 collaboration 目录
+npm run start:gateway
+```
+
+默认初始化服务和网关分别监听本机 8091、8092；Vite 代理精确 `/collaboration` 路径。本机开关不代表生产开放，生产环境仍按 Step11 进行入口验收。详见 [协作启动说明](collaboration/README.md#step06-网关启动与协议)。
+
 ### 4. 受控协作服务
 
-按 [协作模块运行说明](collaboration/README.md#step06-网关启动与协议)配置三个独立内部 HMAC 密钥、精确 Origin 白名单以及 Spring/网关地址，构建协作模块后分别执行 `npm start` 和 `npm run start:gateway`。初始化服务默认监听本机 8091，网关默认监听本机 8092 的 `/collaboration`；`/internal/` 不得通过公网代理暴露。仅受控开发环境开启创建、票据与网关开关；浏览器正式编辑器和生产入口仍等待后续步骤。
+按 [协作模块运行说明](collaboration/README.md#step06-网关启动与协议)配置三个独立内部 HMAC 密钥、精确 Origin 白名单以及 Spring/网关地址，构建协作模块后分别执行 `npm start` 和 `npm run start:gateway`。初始化服务默认监听本机 8091，网关默认监听本机 8092 的 `/collaboration`；Vite 仅将该精确 WebSocket 路径代理到本机网关，`/internal/` 不对浏览器开放。仅受控开发环境开启创建、票据与网关开关，然后从团队项目页进入编辑器；生产入口仍等待后续步骤。
 
 ## 常用命令
 

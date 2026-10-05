@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { getAuthUser, login, logout, register, subscribeAuth } from './api/auth'
 import { ApiError } from './api/client'
 import * as teams from './api/teams'
 import type { TeamProjectDetails, TeamProjectSummary } from './types/collaboration'
 import type { Invitation, Invitee, JoinRequest, Member, MyInvitation, Team } from './types/team'
+const ProjectWorkspace = lazy(() => import('./editor/v2/ProjectWorkspace'))
 
 /**
  * 将 API 业务码、状态及限流等待时间转换为适合页面展示的中文错误提示。
@@ -268,7 +269,7 @@ function TeamPage() {
     {team ? <><div className="v2-columns"><section className="v2-panel"><h2>成员</h2><ul className="v2-list">{members.map(member => <li key={member.userId}><span>{member.displayName} <small>@{member.username} · {member.role === 'OWNER' ? '所有者' : '成员'}</small></span>
       {isOwner && member.role === 'MEMBER' ? <span className="v2-actions"><button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.transferOwner(teamId, member.userId); await reload() })}>转移所有权</button><button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.removeMember(teamId, member.userId); await reload() })}>移除</button></span> : null}</li>)}</ul>
       {!isOwner ? <button type="button" disabled={task.busy} onClick={() => void runTeam(async () => { await teams.leaveTeam(teamId); navigate('/teams') })}>退出团队</button> : null}</section>
-      <section className="v2-panel"><h2>项目</h2><p>新项目包含初始文件，编辑器暂未开放。</p>
+      <section className="v2-panel"><h2>项目</h2><p>团队成员可以共同编辑项目文件。</p>
         <form className="v2-form" onSubmit={event => {
           event.preventDefault(); const form = new FormData(event.currentTarget)
           void runTeam(async () => {
@@ -294,6 +295,7 @@ function TeamPage() {
  * 加载团队项目元数据，提供重命名、当前文档复制和初始化重试。
  */
 function ProjectPage() {
+  const user = useSyncExternalStore(subscribeAuth, getAuthUser)
   const teamId = Number(useParams().teamId)
   const projectId = Number(useParams().projectId)
   const task = useTask()
@@ -324,7 +326,7 @@ function ProjectPage() {
     return () => controller.abort()
   }, [teamId, projectId])
   return <Shell><section className="v2-section"><div className="v2-heading"><div><p><Link to={`/teams/${teamId}`}>团队项目</Link> / 项目</p><h1>{project?.name ?? '正在加载项目…'}</h1></div></div><Feedback error={loadError || task.error} notice={task.notice} />
-    {project ? <div className="v2-panel"><p>项目编辑与文件操作将在步骤 07 接入。当前可以管理项目元数据。</p><div className="v2-actions"><button type="button" disabled={task.busy} onClick={() => {
+    {project ? <div className="v2-panel"><div className="v2-actions"><button type="button" disabled={task.busy} onClick={() => {
       const name = window.prompt('新的项目名称', project.name)?.trim()
       if (name && name !== project.name) void runProject(async () => { const next = await teams.updateTeamProject(teamId, project, name); setProject({ ...project, ...next }) }, '项目已重命名。')
     }}>重命名</button><button type="button" disabled={task.busy} onClick={() => {
@@ -338,6 +340,7 @@ function ProjectPage() {
         const copy = await teams.retryTeamProjectInitialization(teamId, initializingId); navigate(`/teams/${teamId}/projects/${copy.id}`)
       })}>重试项目初始化</button> : null}
     </div></div> : null}
+    {project && user ? <Suspense fallback={<p>正在加载编辑器…</p>}><ProjectWorkspace key={`${user.id}:${project.id}:${project.collaboration.epoch}`} project={project} userId={user.id} teamId={teamId} /></Suspense> : null}
   </section></Shell>
 }
 

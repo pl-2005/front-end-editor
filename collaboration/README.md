@@ -117,4 +117,31 @@ npm run build
 node scripts/verify-step06-local.mjs
 ```
 
-脚本读取根 `.env` 的本机 MySQL/MinIO/Redis，使用 loopback 18086/18092/18093，临时内部密钥只存在进程内，不修改根配置、不打印凭据；验证票据单用、真实 Provider 同步、自动保存、复制前 flush、离房 flush 及网关重启恢复，最后停止临时服务。验收账号、团队和项目保留本机。故障与并发覆盖通过后端测试和协作模块测试完成，正式编辑器绑定留给 Step07。
+脚本读取根 `.env` 的本机 MySQL/MinIO/Redis，使用 loopback 18086/18092/18093，临时内部密钥只存在进程内，不修改根配置、不打印凭据；验证票据单用、真实 Provider 同步、自动保存、复制前 flush、离房 flush 及网关重启恢复，最后停止临时服务。验收账号、团队和项目保留本机。故障与并发覆盖通过后端测试和协作模块测试完成；正式编辑器及浏览器验收见 Step07。
+
+## Step07 本机浏览器验收
+
+V2 项目工作区已接入 Monaco/Yjs 与单向 Sandpack 投影。Vite 从根 `.env` 读取本机代理配置：API 默认 localhost:8080，WebSocket 默认 127.0.0.1:8092 的精确 `/collaboration`；可用仅服务端读取的 `LOCAL_API_URL`、`LOCAL_COLLAB_URL` 覆盖。Origin 白名单必须匹配浏览器页面 origin。内部 HMAC、MySQL、MinIO、JWT 和刷新凭据不传给浏览器配置。
+
+连接的 ready 身份和 schema/epoch 校验通过，并收到初始 persistence 状态后才可编辑。persistence 除 generation/contentHash/dirtySequence/durableSequence/status 外提供 acceptedHash/durableHash：对规范 schema 内容与 CRDT clocks 的 SHA-256，覆盖纯删除，避免 undo 保留数据与网关 GC 导致的二进制差异。对象 contentHash 的含义不变。当前本地指纹匹配且 durableSequence 覆盖 dirtySequence 时，才显示已持久化。
+
+使用本机 MySQL/MinIO/Redis 和已连接的 web-access CDP proxy（默认 localhost:3456）；只新建、操作验收标签页。后端构建目录使用绝对路径：
+
+```powershell
+$step07BuildPath = Join-Path (Get-Location).Path '.codex-build/step07-backend'
+cd backend
+mvn -o package "-Deditor.build.directory=$step07BuildPath"
+cd ../frontend
+npm ci
+npm run build
+npm run lint
+npm test
+cd ../collaboration
+npm ci
+npm test
+node scripts/verify-step07-local.mjs
+```
+
+脚本读取根 `.env`，在独立 Vite/Java/网关进程中使用 loopback 15173/18086/18092/18093，避免 Vite 编译干扰网关五秒租约。验证真实补全接受、HTML/CSS/JS 诊断、跨文件导入、结构操作、undo/redo、容量保护、大文件降级、Sandpack 控制台、自动持久化、网关重启、新票据、工作区重开和服务端撤权后的模型清理。结束后关闭临时服务和验收页，保留验收账号、项目与 `.codex-build/step07-workspace.png`；身份及内部凭据仅在内存中，不修改根 `.env`。可用 CDP_PROXY_URL 覆盖本机 proxy 地址。
+
+文本断线只读，y-indexeddb 日志和完整 Presence 仍由 Step08 接入；项目删除与 Outbox 主动撤权仍由 Step09 完成。生产开关保持关闭，Step11 才发布完整 V2。

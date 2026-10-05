@@ -1,23 +1,31 @@
 import * as Y from 'yjs'
 import { randomUUID } from 'node:crypto'
+import { documentFingerprint, LIMITS, resolvedPaths, validatePath } from './document-rules.js'
+export { LIMITS, validatePath } from './document-rules.js'
 
-export const LIMITS = Object.freeze({ files: 100, fileBytes: 1024 * 1024, totalBytes: 10 * 1024 * 1024, documentBytes: 12 * 1024 * 1024, updateBytes: 2 * 1024 * 1024 })
-const languages: Record<string, string> = { html: 'html', css: 'css', js: 'javascript', json: 'json', txt: 'plaintext', md: 'markdown' }
 export type FileInput = { path: string; code: string }
 export type Identity = { projectId: number; epoch: number }
+export function fingerprint(doc: Y.Doc): string {
+  return documentFingerprint(doc.getMap('meta').toJSON(), doc.getArray<string>('fileOrder').toArray(),
+    [...doc.getMap<Y.Map<unknown>>('files')].map(([id, f]) => ({ id, path: f.get('path') as string, language: f.get('language') as string,
+      deletedAt: f.get('deletedAt') as number | null, code: (f.get('content') as Y.Text).toString() })), Y.encodeStateVector(doc))
+}
 
 /**
- * 校验 NFKC 绝对路径、路径段和允许扩展名，返回对应语言标识；非法路径抛出错误。
- *
- * @param path 目标路径
- * @returns 与文件扩展名对应的语言标识
+ * 在完整校验后按稳定文件 ID 归一化同路径冲突；其他无效结构仍拒绝。
+ * @param doc 临时权威文档
+ * @param expected 预期项目身份
  */
-export function validatePath(path: string): string {
-  if (typeof path !== 'string' || path !== path.normalize('NFKC') || path.length > 255 || !path.startsWith('/')
-    || /[\\\u0000-\u001f\u007f]/u.test(path) || path.slice(1).split('/').some(p => !p.trim() || p === '.' || p === '..')) throw new Error('Invalid file path')
-  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  if (!Object.hasOwn(languages, ext)) throw new Error('Unsupported file type')
-  return languages[ext]
+export function normalizeConflicts(doc: Y.Doc, expected: Identity): void {
+  // Fully validate malformed inputs before repairing the one permitted conflict.
+  validateDocument(doc, expected, true)
+  const files = doc.getMap<Y.Map<unknown>>('files')
+  const active = [...files].filter(([, f]) => f.get('deletedAt') === null).map(([id, f]) => ({ id, path: f.get('path') as string }))
+  const paths = resolvedPaths(active)
+  doc.transact(() => {
+    for (const file of active) if (file.path !== paths.get(file.id)) files.get(file.id)!.set('path', paths.get(file.id)!)
+  }, 'gateway-path-normalization')
+  validateDocument(doc, expected)
 }
 
 /**
@@ -66,7 +74,7 @@ export function createDocument(value: Identity, entry: string, files: FileInput[
  * @param doc Yjs 协作文档
  * @param expected 预期的项目 ID 和 epoch
  */
-export function validateDocument(doc: Y.Doc, expected: Identity): void {
+export function validateDocument(doc: Y.Doc, expected: Identity, allowPathConflicts = false): void {
   identity(expected)
   if ([...doc.share.keys()].some(key => !['meta', 'files', 'fileOrder'].includes(key))) throw new Error('Unknown document root')
   const meta = doc.getMap('meta'), files = doc.getMap('files'), order = doc.getArray<string>('fileOrder')
@@ -81,7 +89,7 @@ export function validateDocument(doc: Y.Doc, expected: Identity): void {
     const path = item.get('path'), deleted = item.get('deletedAt')
     if (typeof path !== 'string' || item.get('language') !== validatePath(path) || (deleted !== null && (!Number.isSafeInteger(deleted) || deleted < 0))) throw new Error('Invalid file metadata')
     if (deleted === null) {
-      if (paths.has(path)) throw new Error('Duplicate file path')
+      if (!allowPathConflicts && paths.has(path)) throw new Error('Duplicate file path')
       paths.add(path)
     }
     const content = item.get('content') as Y.Text

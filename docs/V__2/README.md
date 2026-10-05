@@ -27,11 +27,12 @@
 | 04 | 已实现并完成自动检查及本机流程验收 | [前端身份与团队界面](./steps/04-frontend-auth-team-permission-shell.md) |
 | 05 | 已实现并完成自动检查及本机功能验收（2026-10-04） | [Y.Doc 初始文件与当前状态持久化](./steps/05-collaboration-state-storage-foundation.md) |
 | 06 | 已实现并完成自动检查及本机功能验收（2026-10-04） | [协作网关、票据与自动持久化](./steps/06-collaboration-gateway-and-ticket.md) |
-| 07–11 | 未开始 | — |
+| 07 | 已实现并完成自动检查及本机功能验收（2026-10-05） | [Monaco/Yjs/Sandpack 桥与语言服务](./steps/07-yjs-monaco-sandpack-bridge.md) |
+| 08–11 | 未开始 | — |
 
 首期部署与验收采用单网关实例；步骤 09 完成前生产协作开关保持关闭。
 
-当前下一步为 Step07：将现有项目工作区接入票据、Hocuspocus Provider、Monaco/Yjs 与 Sandpack 单向派生桥。Step06 已提供初始持久化状态及后续状态消息，前端须分别展示 WebSocket 同步与 durableSequence 确认的持久化状态。Step08 再接入离线更新重发和完整 Presence 界面，Step09 完成删除 fence 与 Outbox 主动撤权。
+当前下一步为 Step08：接入 y-indexeddb 离线更新日志、离线编辑和重新授权后的重发，并完成在线成员、远端光标及结构冲突恢复交互。Step07 已接入正式协作工作区、Monaco/Yjs 与 Sandpack 单向派生桥，分别展示当前 WebSocket 同步与 durableSequence/状态指纹确认的持久化状态。Step09 完成删除 fence 与 Outbox 主动撤权。
 
 ## 门禁规则
 

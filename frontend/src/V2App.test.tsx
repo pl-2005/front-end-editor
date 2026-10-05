@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearAuth, setCredentials } from './api/auth'
+vi.mock('./editor/v2/ProjectWorkspace', () => ({ default: () => <section aria-label="项目协作工作区" /> }))
 
 const user = { id: 4, username: 'member', email: 'member@example.test', displayName: 'Member', avatarColor: '#6366F1' }
 const ok = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } })
