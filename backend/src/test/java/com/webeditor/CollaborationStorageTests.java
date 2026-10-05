@@ -37,13 +37,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:collaboration;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
-        "editor.collaboration.creation-enabled=true", "editor.collaboration.storage-secret=" + CollaborationStorageTests.SECRET })
+        "editor.collaboration.creation-enabled=true", "editor.collaboration.ticket-enabled=true",
+        "editor.collaboration.storage-secret=" + CollaborationStorageTests.SECRET })
 @AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class CollaborationStorageTests {
     static final String SECRET = "test-only-collaboration-storage-secret-32";
     @Autowired CollabProjectService creation;
     @Autowired CollabPersistenceService persistence;
+    @Autowired CollabTicketService tickets;
+    @MockitoBean CollabGatewayClient gateway;
     @Autowired CollabBackupService backups;
     @MockitoSpyBean CollabStore store;
     @Autowired ProjectRepository projects;
@@ -69,6 +72,8 @@ class CollaborationStorageTests {
         try (var connection = jdbc.getDataSource().getConnection()) {
             org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
                     new org.springframework.core.io.ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));
+            org.springframework.jdbc.datasource.init.ScriptUtils.executeSqlScript(connection,
+                    new ClassPathResource("db/migration/V11__collaboration_tickets_and_nonces.sql"));
         }
     }
     @BeforeEach void setup() {
@@ -202,5 +207,87 @@ class CollaborationStorageTests {
         mvc.perform(get(path).header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", nonce).header("X-Collab-Signature", sig)).andExpect(status().isOk());
         mvc.perform(get(path).header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", nonce).header("X-Collab-Signature", sig)).andExpect(status().isUnauthorized());
         mvc.perform(get(path + "?generation=999").header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", UUID.randomUUID()).header("X-Collab-Signature", sig)).andExpect(status().isUnauthorized());
+    }
+    @Test void ticketRouteRequiresBearerAndLegacyRoutesRemainClosed() throws Exception {
+        long id = create();
+        mvc.perform(post("/api/projects/{id}/collab-ticket", id)).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/projects/{id}/collab-ticket", id).header("Authorization", bearer()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.ticket").isString())
+                .andExpect(jsonPath("$.data.epoch").value(1));
+        mvc.perform(get("/api/projects/{id}", id).header("Authorization", bearer())).andExpect(status().isForbidden());
+    }
+    @Test void concurrentHandshakeConsumesOpaqueTicketExactlyOnce() throws Exception {
+        long id = create(); var ticket = tickets.issue(id, owner.getId());
+        assertThat(ticket.ticket()).hasSize(43);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM collab_ticket WHERE token_hash=?", Long.class, ticket.ticket())).isZero();
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Callable<Object> consume = () -> { try { return tickets.consume(ticket.ticket(), id, 1); } catch (CollabFailure e) { return e; } };
+            var a = executor.submit(consume); var b = executor.submit(consume);
+            var results = List.of(a.get(5, TimeUnit.SECONDS), b.get(5, TimeUnit.SECONDS));
+            assertThat(results.stream().filter(CollabTicketService.Identity.class::isInstance).count()).isEqualTo(1);
+            assertThat(results.stream().filter(CollabFailure.class::isInstance).count()).isEqualTo(1);
+        }
+    }
+    @Test void ticketsCannotCrossProjectsOrEpochsAndExpire() {
+        long id = create(), other = create(); var ticket = tickets.issue(id, owner.getId());
+        assertThatThrownBy(() -> tickets.consume(ticket.ticket(), other, 1)).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> tickets.consume(ticket.ticket(), id, 2)).isInstanceOf(CollabFailure.class);
+        assertThat(tickets.consume(ticket.ticket(), id, 1).projectId()).isEqualTo(id);
+        var expired = tickets.issue(id, owner.getId());
+        jdbc.update("UPDATE collab_ticket SET expires_at=? WHERE token_hash=?", java.sql.Timestamp.from(Instant.now().minusSeconds(1)),
+                CollabPersistenceService.hash(expired.ticket().getBytes(StandardCharsets.US_ASCII)));
+        assertThatThrownBy(() -> tickets.consume(expired.ticket(), id, 1)).isInstanceOf(CollabFailure.class);
+    }
+    @Test void currentMemberAndWaterlineAreRecheckedAtHandshakeAndLeaseRenewal() {
+        long id = create();
+        var live = tickets.consume(tickets.issue(id, owner.getId()).ticket(), id, 1);
+        var lease = tickets.authorization(live);
+        var old = tickets.issue(id, owner.getId());
+        tx.executeWithoutResult(status -> users.incrementAuthzVersion(owner.getId()));
+        assertThatThrownBy(() -> tickets.consume(old.ticket(), id, 1)).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> tickets.revalidate(lease)).isInstanceOf(CollabFailure.class);
+        var current = tickets.issue(id, owner.getId());
+        jdbc.update("UPDATE team_member SET status='REMOVED', removed_at=CURRENT_TIMESTAMP WHERE team_id=? AND user_id=?", teamId, owner.getId());
+        assertThatThrownBy(() -> tickets.consume(current.ticket(), id, 1)).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> tickets.issue(id, owner.getId())).isInstanceOf(CollabFailure.class);
+    }
+    @Test void crossTeamAndDeletedProjectsCannotObtainTickets() {
+        long id = create(); String name = "outsider" + UUID.randomUUID().toString().substring(0, 8);
+        var outsider = users.saveAndFlush(new AppUser(name, name, null, null, "{bcrypt}unused", name, "#123456"));
+        assertThatThrownBy(() -> tickets.issue(id, outsider.getId())).isInstanceOf(CollabFailure.class);
+        var ticket = tickets.issue(id, owner.getId());
+        jdbc.update("UPDATE project SET status=0 WHERE id=?", id);
+        assertThatThrownBy(() -> tickets.consume(ticket.ticket(), id, 1)).isInstanceOf(CollabFailure.class);
+    }
+    @Test void copyFlushesBeforeReservationAndFailureLeavesNoNewProject() {
+        long id = create(); long before = projects.count();
+        when(gateway.flush(id)).thenThrow(new CollabFailure(503, "COLLAB_FLUSH_FAILED"));
+        assertThatThrownBy(() -> creation.copy(teamId, owner.getId(), id, "Unavailable copy")).isInstanceOf(CollabFailure.class);
+        assertThat(projects.count()).isEqualTo(before);
+        doAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            var saved = persistence.persist(id, 1, 1, "flush-copy", new byte[]{91});
+            return new CollabGatewayClient.Durable(id, 1, saved.generation(), saved.contentHash(), 1);
+        }).when(gateway).flush(id);
+        long copied = creation.copy(teamId, owner.getId(), id, "Latest copy").id();
+        var expected = persistence.describe(id);
+        verify(initializer).copy(eq(copied), eq(expected), aryEq(new byte[]{91}));
+    }
+    @Test void internalTicketAndLeaseEndpointsRequireHmacAndNonceSurvivesNewAuthenticator() throws Exception {
+        long id = create(); var ticket = tickets.issue(id, owner.getId());
+        String path = "/internal/collaboration/tickets/consume";
+        byte[] body = ("{\"ticket\":\"" + ticket.ticket() + "\",\"projectId\":" + id + ",\"epoch\":1}").getBytes(StandardCharsets.UTF_8);
+        mvc.perform(post(path).contentType("application/json").content(body)).andExpect(status().isUnauthorized());
+        String timestamp = Long.toString(Instant.now().getEpochSecond()), nonce = UUID.randomUUID().toString();
+        String sig = InternalHmac.sign(SECRET, "POST", path, "storage", timestamp, nonce, body);
+        mvc.perform(post(path).contentType("application/json").content(body).header("X-Collab-Timestamp", timestamp)
+                .header("X-Collab-Nonce", nonce).header("X-Collab-Signature", sig))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.identity.userId").value(owner.getId()))
+                .andExpect(jsonPath("$.authorization.authzVersion").value(users.findById(owner.getId()).orElseThrow().getAuthzVersion()));
+        var request = new org.springframework.mock.web.MockHttpServletRequest("POST", path);
+        request.setContent(body); request.addHeader("X-Collab-Timestamp", timestamp); request.addHeader("X-Collab-Nonce", nonce); request.addHeader("X-Collab-Signature", sig);
+        assertThatThrownBy(() -> new CollabInternalAuth(jdbc, SECRET).authenticate(request)).isInstanceOf(CollabFailure.class);
+        mvc.perform(post("/internal/collaboration/connections/revalidate").contentType("application/json").content("{}"))
+                .andExpect(status().isUnauthorized());
     }
 }

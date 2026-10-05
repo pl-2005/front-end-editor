@@ -19,6 +19,7 @@ public class CollabProjectService {
     private final CollabInitializer initializer;
     private final ProjectTemplateService templates;
     private final CollabPersistenceService persistence;
+    private final CollabGatewayClient gateway;
     private final TransactionTemplate tx;
     private final boolean creationEnabled;
     /**
@@ -37,10 +38,10 @@ public class CollabProjectService {
      */
     public CollabProjectService(ProjectRepository projects, TeamRepository teams, TeamAccessService access,
             CollabStore store, CollabObjectStorage storage, CollabInitializer initializer, ProjectTemplateService templates,
-            CollabPersistenceService persistence, TransactionTemplate tx,
+            CollabPersistenceService persistence, CollabGatewayClient gateway, TransactionTemplate tx,
             @Value("${editor.collaboration.creation-enabled:false}") boolean creationEnabled) {
         this.projects = projects; this.teams = teams; this.access = access; this.store = store; this.storage = storage;
-        this.initializer = initializer; this.templates = templates; this.persistence = persistence; this.tx = tx; this.creationEnabled = creationEnabled;
+        this.initializer = initializer; this.templates = templates; this.persistence = persistence; this.gateway = gateway; this.tx = tx; this.creationEnabled = creationEnabled;
     }
     /**
      * 校验创建开关、成员权限和模板，先预留项目 ID，再初始化二进制文档并激活项目。
@@ -73,9 +74,10 @@ public class CollabProjectService {
         if (p.getStatus() != 2) throw new CollabFailure(409, "COLLAB_INITIALIZATION_CONFLICT");
         if (p.getInitializationSourceId() != null) {
             access.project(teamId, p.getInitializationSourceId(), userId);
-            CollabPointer source = persistence.describe(p.getInitializationSourceId());
-            return attempt(projectId, () -> activate(teamId, userId, projectId, initializer.copy(projectId, source,
-                    persistence.load(source.projectId(), source.epoch(), source.generation()))));
+            return attempt(projectId, () -> {
+                CurrentDocument source = currentForCopy(p.getInitializationSourceId());
+                return activate(teamId, userId, projectId, initializer.copy(projectId, source.pointer(), source.bytes()));
+            });
         }
         return attempt(projectId, () -> activate(teamId, userId, projectId, initializer.initialize(projectId, p.getEntryFile(), templates.files(p.getTemplate(), p.getEntryFile()))));
     }
@@ -90,13 +92,25 @@ public class CollabProjectService {
      */
     public CollabProjectResponses.Summary copy(long teamId, long userId, long sourceId, String name) {
         enabled(); Project source = access.project(teamId, sourceId, userId);
-        CollabPointer pointer = persistence.describe(sourceId);
-        byte[] bytes = persistence.load(sourceId, pointer.epoch(), pointer.generation());
+        CurrentDocument document = currentForCopy(sourceId);
         Project target = tx.execute(status -> {
             Project p = reserveWithinTransaction(teamId, userId, name.trim(), source.getDescription(), source.getTemplate(), source.getEntryFile());
             p.setInitializationSourceId(sourceId); return projects.saveAndFlush(p);
         });
-        return attempt(target.getId(), () -> activate(teamId, userId, target.getId(), initializer.copy(target.getId(), pointer, bytes)));
+        return attempt(target.getId(), () -> activate(teamId, userId, target.getId(), initializer.copy(target.getId(), document.pointer(), document.bytes())));
+    }
+    private record CurrentDocument(CollabPointer pointer, byte[] bytes) {}
+    /** A successful flush covers its captured sequence; later saves may advance the current pointer. */
+    private CurrentDocument currentForCopy(long sourceId) {
+        var durable = gateway.flush(sourceId);
+        for (int count = 0; count < 3; count++) {
+            CollabPointer pointer = persistence.describe(sourceId);
+            if (durable != null && (pointer.epoch() != durable.epoch() || pointer.generation() < durable.generation()))
+                throw new CollabFailure(409, "COLLAB_EPOCH_CONFLICT");
+            try { return new CurrentDocument(pointer, persistence.load(sourceId, pointer.epoch(), pointer.generation())); }
+            catch (CollabFailure e) { if (!"COLLAB_GENERATION_CONFLICT".equals(e.code())) throw e; }
+        }
+        throw new CollabFailure(503, "COLLAB_COPY_BUSY");
     }
     /**
      * 执行初始化操作，将存储、数据库及 503 协作故障转换为携带项目 ID 的可重试错误。

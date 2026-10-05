@@ -1,11 +1,12 @@
 import { createServer } from 'node:http'
 import { copyDocument, createDocument, encodeDocument, LIMITS, type FileInput } from './document.js'
 import { equal, signature, hash } from './hmac.js'
+import { NonceStore } from './internal.js'
 
 const secret = process.env.COLLAB_INITIALIZER_SECRET ?? ''
 if (Buffer.byteLength(secret) < 32) throw new Error('COLLAB_INITIALIZER_SECRET must contain at least 32 bytes')
 // Loopback only; the initializer never receives storage credentials or executes project code.
-const nonces = new Map<string, number>()
+const nonces = new NonceStore(process.env.COLLAB_INITIALIZER_NONCE_PATH ?? '../.codex-build/initializer-nonces.sqlite')
 /**
  * 处理本机文档初始化请求：限制正文大小，校验 HMAC、时间窗及 nonce，
  * 创建或复制 Y.Doc 后返回完整二进制和摘要；响应完成后始终销毁临时文档。
@@ -27,10 +28,7 @@ const server = createServer(async (request, response) => {
     }
     const body = Buffer.concat(chunks)
     if (!equal(supplied, signature(secret, 'POST', request.url, 'initializer', timestamp, nonce, body))) { response.writeHead(401).end(); return }
-    const now = Date.now()
-    for (const [key, expiry] of nonces) if (expiry < now) nonces.delete(key)
-    if (nonces.has(nonce) || nonces.size >= 10000) { response.writeHead(401).end(); return }
-    nonces.set(nonce, now + 61000)
+    try { nonces.claim('initializer', nonce) } catch { response.writeHead(401).end(); return }
     const input = JSON.parse(body.toString()) as { projectId: number; epoch: number; entry: string; files: FileInput[]; source?: { projectId: number; epoch: number; bytes: string } }
     const target = { projectId: input.projectId, epoch: input.epoch }
     if (input.source && input.source.bytes.length > Math.ceil(LIMITS.documentBytes / 3) * 4) throw new Error('Document size limit exceeded')
@@ -45,4 +43,4 @@ const server = createServer(async (request, response) => {
 server.requestTimeout = 15000
 server.headersTimeout = 10000
 server.listen(Number(process.env.COLLAB_INITIALIZER_PORT ?? 8091), '127.0.0.1')
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close())
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => nonces.close()))

@@ -3,13 +3,29 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=24" },
-  "exports": { ".": "./src/document.ts" },
+  "engines": {
+    "node": ">=24"
+  },
+  "exports": {
+    ".": "./src/document.ts"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node scripts/start.mjs",
+    "start:gateway": "node scripts/start-gateway.mjs",
     "test": "npm run build && node --test test/*.test.mjs"
   },
-  "dependencies": { "yjs": "13.6.27" },
-  "devDependencies": { "@types/node": "26.6.2", "typescript": "6.0.3" }
+  "dependencies": {
+    "@hocuspocus/provider": "4.7.0",
+    "@hocuspocus/server": "4.7.0",
+    "lib0": "^0.2.119",
+    "ws": "^8.22.0",
+    "y-protocols": "^1.0.7",
+    "yjs": "13.6.27"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "@types/ws": "^8.18.2",
+    "typescript": "6.0.3"
+  }
 }

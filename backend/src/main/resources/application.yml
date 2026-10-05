@@ -26,7 +26,12 @@ spring:
 editor:
   collaboration:
     creation-enabled: ${COLLAB_CREATION_ENABLED:false}
+    ticket-enabled: ${COLLAB_TICKET_ENABLED:false}
     storage-secret: ${COLLAB_STORAGE_SECRET:}
+    gateway:
+      enabled: ${COLLAB_GATEWAY_ENABLED:false}
+      url: ${COLLAB_GATEWAY_INTERNAL_URL:http://127.0.0.1:8092}
+      secret: ${COLLAB_GATEWAY_SECRET:}
     initializer:
       url: ${COLLAB_INITIALIZER_URL:http://127.0.0.1:8091/internal/initialize}
       secret: ${COLLAB_INITIALIZER_SECRET:}
