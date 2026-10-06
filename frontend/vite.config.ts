@@ -6,6 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL('../', import.meta.url)), '')
   return {
     plugins: [react()],
+    cacheDir: env.LOCAL_VITE_CACHE_DIR || 'node_modules/.vite',
     resolve: { dedupe: ['yjs', 'monaco-editor'] },
     worker: { format: 'es' },
     server: {

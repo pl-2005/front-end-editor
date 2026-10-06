@@ -22,7 +22,8 @@ function fixture() {
   Object.entries({ schemaVersion: 1, projectId: 7, epoch: 1, entryFileId: 'entry' }).forEach(([k, v]) => meta.set(k, v))
   Object.entries({ id: 'entry', path: '/index.html', language: 'html', deletedAt: null, content: text }).forEach(([k, v]) => file.set(k, v))
   doc.getMap('files').set('entry', file); doc.getArray('fileOrder').push(['entry'])
-  return { doc, text, identity: { projectId: 7, epoch: 1 } }
+  const state = { synced: false }
+  return { doc, text, identity: { projectId: 7, epoch: 1 }, subscribe: () => () => {}, snapshot: () => state }
 }
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); Object.keys(runtime.files).forEach(k => delete runtime.files[k]) })
 describe('Sandpack document projection lifecycle', () => {

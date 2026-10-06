@@ -35,7 +35,7 @@ function validSelection(value: unknown): boolean {
       return Object.keys(id).every(key => ['client', 'clock'].includes(key))
         && Number.isSafeInteger(id.client) && Number(id.client) >= 0 && Number.isSafeInteger(id.clock) && Number(id.clock) >= 0
     }
-    return id(item.type) && id(item.item) && (item.tname === undefined || typeof item.tname === 'string' && item.tname.length <= 100)
+    return id(item.type) && id(item.item) && (item.tname === undefined || item.tname === null || typeof item.tname === 'string' && item.tname.length <= 100)
       && (item.assoc === undefined || Number.isSafeInteger(item.assoc))
   }
   return position(record.anchor) && position(record.head)
@@ -142,7 +142,7 @@ export function createGateway(options: GatewayOptions) {
     },
     async connected({ context, connection, documentName }) {
       writable(context); armLease(context, connection)
-      connection.sendStateless(JSON.stringify({ type: 'ready', identity: context.identity }))
+      connection.sendStateless(JSON.stringify({ type: 'ready', identity: { ...context.identity, connectionId: context.key } }))
       const room = rooms.get(documentName)
       if (room) connection.sendStateless(JSON.stringify(room.state()))
     },
@@ -212,7 +212,7 @@ export function createGateway(options: GatewayOptions) {
         if (state.cursor !== undefined && !validSelection(state.cursor) || state.selection !== undefined && !validSelection(state.selection))
           throw new InternalFailure('COLLAB_AWARENESS_INVALID', 400)
         context.awarenessId = id; owners.set(id, context.key)
-        states.set(id, { ...state, user: { id: context.identity.userId, name: context.identity.displayName, color: context.identity.avatarColor } })
+        states.set(id, { ...state, user: { id: context.identity.userId, name: context.identity.displayName, color: context.identity.avatarColor, connectionId: context.key } })
       }
     },
     async onDisconnect({ context, documentName, document }) {

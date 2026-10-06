@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { SandpackPreview, SandpackProvider, useSandpack } from '@codesandbox/sandpack-react'
 import { PreviewConsole } from '../PreviewConsole'
 import type { CollaborationSession } from '../../collaboration/session'
 import type { ProjectFiles } from '../../types/project'
 import { previewProjection } from './projection'
 function Projection({ session, entry }: { session: CollaborationSession; entry: string }) {
+  const state = useSyncExternalStore(session.subscribe, session.snapshot)
   const { sandpack, listen, dispatch } = useSandpack()
   const runtime = useRef(sandpack)
   const listener = useRef(listen)
@@ -43,7 +44,7 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
     session.doc.on('update', schedule); flush()
     return () => { stopped = true; clearTimeout(debounce); clearTimeout(deadline); clearTimeout(readyTask); clearTimeout(refresh); unsubscribe(); session.doc.off('update', schedule) }
   }, [session, entry])
-  return <div className="v2-preview-pane">{error ? <p role="alert">{error}</p> : null}<SandpackPreview startRoute={entry === '/index.html' ? '/' : entry} showOpenInCodeSandbox={false} showRefreshButton /><details className="v2-console" open><summary>控制台</summary><PreviewConsole /></details></div>
+  return <div className="v2-preview-pane">{!state.synced ? <p role="status">本地未同步 · 预览读取本地文件；首次启动需要运行依赖可用。</p> : null}{error ? <p role="alert">{error}</p> : null}<SandpackPreview startRoute={entry === '/index.html' ? '/' : entry} showOpenInCodeSandbox={false} showRefreshButton /><details className="v2-console" open><summary>控制台</summary><PreviewConsole /></details></div>
 }
 export function SandpackBridge({ session, entry, structureKey }: { session: CollaborationSession; entry: string; structureKey: string }) {
   const initial = useMemo(() => ({ ...previewProjection(session), entry, structureKey }), [session, entry, structureKey])

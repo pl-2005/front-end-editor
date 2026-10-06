@@ -144,4 +144,32 @@ node scripts/verify-step07-local.mjs
 
 脚本读取根 `.env`，在独立 Vite/Java/网关进程中使用 loopback 15173/18086/18092/18093，避免 Vite 编译干扰网关五秒租约。验证真实补全接受、HTML/CSS/JS 诊断、跨文件导入、结构操作、undo/redo、容量保护、大文件降级、Sandpack 控制台、自动持久化、网关重启、新票据、工作区重开和服务端撤权后的模型清理。结束后关闭临时服务和验收页，保留验收账号、项目与 `.codex-build/step07-workspace.png`；身份及内部凭据仅在内存中，不修改根 `.env`。可用 CDP_PROXY_URL 覆盖本机 proxy 地址。
 
-文本断线只读，y-indexeddb 日志和完整 Presence 仍由 Step08 接入；项目删除与 Outbox 主动撤权仍由 Step09 完成。生产开关保持关闭，Step11 才发布完整 V2。
+上述记录对应 Step07 验收；Step08 已补齐离线日志、持续编辑与 Presence，见下节。项目删除与 Outbox 主动撤权仍由 Step09 完成。生产开关保持关闭，Step11 才发布完整 V2。
+
+## Step08 本机浏览器验收
+
+本地日志使用 `web-editor:{userId}:{projectId}:{epoch}`，待确认更新预算为 1.5 MiB；缓存保存受限 Yjs 更新、待同步计数和恢复提示的 fileId，不保存身份凭据。多标签页原子合并缓存，持久化确认匹配后再清零计数。正常关闭工作区保留日志，授权失效清理日志及内容。重启浏览器后须重新登录；不支持完全离线登录。Sandpack 离线消费本地文档，首次运行仍需可用的运行依赖。
+
+Awareness 的 user 增加服务端绑定的 connectionId，ready.identity 同时提供该字段；相对选区允许 Yjs 正常编码的 `tname: null`。前端按用户和连接显示成员及远端光标，远端删除时可恢复为新文件或验证访问权后复制，恢复提示在重新打开后保留。
+
+协作颜色按可见 userId 分配并解决冲突，同一用户多标签页共用颜色。Monaco 在远端光标旁持续显示同色姓名标签，与选区高亮和成员列表一致；标签随光标移动，切换文件或离房后清理。浏览器验收额外检查姓名可见、颜色一致及折叠光标和文件切换行为，截图保存在 `.codex-build/step08-cursor-label.png`。
+
+```powershell
+# 从仓库根目录执行；编译输出集中在 .codex-build，避免修改依赖缓存。
+$step08BuildPath = Join-Path (Get-Location).Path '.codex-build/step08-backend'
+cd backend
+mvn -o package "-Deditor.build.directory=$step08BuildPath"
+cd ../frontend
+npm test
+npm run lint
+node node_modules/typescript/bin/tsc -p tsconfig.app.json --incremental --tsBuildInfoFile ../.codex-build/step08-app.tsbuildinfo
+node node_modules/typescript/bin/tsc -p tsconfig.node.json --incremental --tsBuildInfoFile ../.codex-build/step08-node.tsbuildinfo
+node node_modules/vite/bin/vite.js build --configLoader runner --outDir ../.codex-build/step08-frontend
+cd ../collaboration
+npm test
+node scripts/verify-step08-local.mjs
+```
+
+浏览器脚本需要已连接的 web-access CDP proxy（默认 localhost:3456），读取根 `.env` 连接本机 MySQL/MinIO/Redis，在 loopback 15173/18086/18092/18093 启动临时服务。只操作新建验收标签页，通过切断协作传输并模拟票据请求网络错误验证离线编辑；应用静态资源与 Sandpack 运行依赖保持可用。覆盖文本与结构编辑、跨扩展名重命名、本地预览日志、新票据合并、两标签页成员/远端选区、删除冲突恢复、页面重载与重新登录后的重发、网关重启和撤权清理。退出团队缓存范围、旧 epoch、容量及存储错误由自动测试覆盖。
+
+脚本不修改根 `.env`，不打印或写入身份凭据；结束后关闭临时服务和自身标签页，保留验收账号、项目及 `.codex-build/step08-workspace.png`。`LOCAL_VITE_CACHE_DIR` 仅用于服务端配置，可将开发缓存定向到工作区可写目录，不进入浏览器环境变量。V2 生产开关保持关闭。

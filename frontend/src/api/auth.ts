@@ -1,4 +1,5 @@
 import type { Credentials, User } from '../types/auth'
+import { purgeUserCaches } from '../collaboration/offline'
 
 let credentials: Credentials | null = null
 let expiresAt = 0
@@ -33,7 +34,11 @@ export function getAuthSession() { return sessionGeneration }
 /**
  * 清除内存凭据及刷新任务，递增状态代次并通知订阅者。
  */
-export function clearAuth() { generation++; sessionGeneration++; credentials = null; expiresAt = 0; refreshPromise = null; notify() }
+export function clearAuth() {
+  const userId = credentials?.user.id
+  generation++; sessionGeneration++; credentials = null; expiresAt = 0; refreshPromise = null; notify()
+  if (userId) void purgeUserCaches(userId).catch(() => {})
+}
 /**
  * 保存内存凭据并计算到期时间；刷新时可保留会话代次，最后通知订阅者。
  *

@@ -1,4 +1,6 @@
-import { request } from './client'
+import { ApiError, request } from './client'
+import { getAuthUser } from './auth'
+import { cachedProjectIds, purgeProjectCaches } from '../collaboration/offline'
 import type { Team, TeamPage, Member, JoinRequest, Invitation, MyInvitation, Invitee } from '../types/team'
 import type { PageResult } from '../types/project'
 import type { TeamProjectDetails, TeamProjectSummary } from '../types/collaboration'
@@ -141,7 +143,18 @@ export const rejectInvitation = (invitationId: number) => request<void>(`/api/te
  *
  * @param teamId 团队 ID
  */
-export const leaveTeam = (teamId: number) => request<void>(`${base(teamId)}/members/me`, { method: 'DELETE' })
+export async function leaveTeam(teamId: number) {
+  const userId = getAuthUser()?.id
+  // Identify cached projects while membership is still valid. Never persist
+  // team membership or credentials alongside the offline content log.
+  const ids: number[] = []
+  if (userId) await Promise.all((await cachedProjectIds(userId)).map(async id => {
+    try { await getTeamProject(teamId, id); ids.push(id) }
+    catch (error) { if (!(error instanceof ApiError && [403, 404, 410].includes(error.status))) throw error }
+  }))
+  await request<void>(`${base(teamId)}/members/me`, { method: 'DELETE' })
+  if (userId) await Promise.all(ids.map(id => purgeProjectCaches(userId, id)))
+}
 /**
  * 由所有者移除指定普通成员。
  *

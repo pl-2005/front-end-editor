@@ -28,11 +28,12 @@
 | 05 | 已实现并完成自动检查及本机功能验收（2026-10-04） | [Y.Doc 初始文件与当前状态持久化](./steps/05-collaboration-state-storage-foundation.md) |
 | 06 | 已实现并完成自动检查及本机功能验收（2026-10-04） | [协作网关、票据与自动持久化](./steps/06-collaboration-gateway-and-ticket.md) |
 | 07 | 已实现并完成自动检查及本机功能验收（2026-10-05） | [Monaco/Yjs/Sandpack 桥与语言服务](./steps/07-yjs-monaco-sandpack-bridge.md) |
-| 08–11 | 未开始 | — |
+| 08 | 已实现并完成自动检查及本机功能验收（2026-10-06） | [离线编辑、Presence 与结构操作](./steps/08-offline-presence-and-structure-ops.md) |
+| 09–11 | 未开始 | — |
 
 首期部署与验收采用单网关实例；步骤 09 完成前生产协作开关保持关闭。
 
-当前下一步为 Step08：接入 y-indexeddb 离线更新日志、离线编辑和重新授权后的重发，并完成在线成员、远端光标及结构冲突恢复交互。Step07 已接入正式协作工作区、Monaco/Yjs 与 Sandpack 单向派生桥，分别展示当前 WebSocket 同步与 durableSequence/状态指纹确认的持久化状态。Step09 完成删除 fence 与 Outbox 主动撤权。
+当前下一步为 Step09：完成删除 fence、durable-close 确认与 Outbox 主动撤权。Step08 已接入有界 y-indexeddb 本地日志、离线文本和结构编辑、重新授权后的重发、在线成员与远端光标，以及远端删除的恢复/复制交互。界面独立展示本地保存、WebSocket 同步与当前状态持久化；项目或账号撤权清理对应缓存，旧 epoch 不合入新房间。生产协作入口仍保持关闭。
 
 ## 门禁规则
 

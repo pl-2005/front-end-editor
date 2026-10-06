@@ -6,7 +6,7 @@ import { CollaborationSession, isDurable, type ConnectionState } from '../../col
 import { MonacoWorkspace } from './MonacoWorkspace'
 import { SandpackBridge } from './SandpackBridge'
 
-const CONNECTION_LABELS: Record<ConnectionState, string> = { connecting: '正在连接', syncing: '正在同步', online: '在线', offline: '离线（暂时只读）', reconnecting: '正在重连', forbidden: '授权失效', failed: '协作失败' }
+const CONNECTION_LABELS: Record<ConnectionState, string> = { connecting: '正在连接', syncing: '正在同步', online: '在线', offline: '离线 · 本地未同步', reconnecting: '正在重连 · 本地未同步', forbidden: '授权失效', failed: '协作失败' }
 function ConnectedWorkspace({ session }: { session: CollaborationSession }) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot)
   const doc = session.doc
@@ -28,15 +28,48 @@ function ConnectedWorkspace({ session }: { session: CollaborationSession }) {
     if (state.connection === 'forbidden') return null
     try { return readDocument(session.doc, session.identity) } catch { return null }
   }, [session, state.revision, state.connection])
-  const commands = useMemo(() => fileCommands(doc, session.identity, () => session.state.writable), [doc, session])
+  const commands = useMemo(() => ({
+    create: (path: string) => session.mutate(d => fileCommands(d, session.identity, () => true).create(path)),
+    rename: (id: string, path: string) => session.mutate(d => fileCommands(d, session.identity, () => true).rename(id, path)),
+    remove: (id: string) => session.mutate(d => fileCommands(d, session.identity, () => true).remove(id)),
+    setEntry: (id: string) => session.mutate(d => fileCommands(d, session.identity, () => true).setEntry(id)),
+  }), [session])
   const activeId = document?.files.some(f => f.id === chosenId) ? chosenId : document?.entryFileId ?? ''
   const entry = document?.files.find(f => f.id === document.entryFileId)?.path ?? '/index.html'
+  useEffect(() => { if (activeId && state.connection !== 'forbidden') session.setActiveFile(activeId) }, [session, activeId, state.connection])
   const run = (action: () => void) => { try { action(); setError('') } catch (cause) { setError(cause instanceof Error ? cause.message : '文件操作失败') } }
   const saved = isDurable(state)
   const acknowledged = state.localHash && state.localHash === state.persistence?.acceptedHash
   return <section className="v2-workspace" aria-label="项目协作工作区">
     <header className="v2-workspace-status" role="status"><span>{CONNECTION_LABELS[state.connection]} · {state.synced && acknowledged ? 'WebSocket 已同步' : 'WebSocket 未同步'}</span>
-      <span>{state.persistence?.status === 'failed' ? '持久化失败，暂停输入' : saved ? `已持久化 · generation ${state.persistence?.generation}` : acknowledged ? '已同步，等待持久化' : '等待同步与持久化确认'}</span></header>
+      <span>{state.persistence?.status === 'failed' ? '持久化失败，暂停输入' : saved ? `已持久化 · generation ${state.persistence?.generation}` : acknowledged && state.synced ? '已同步，等待持久化' : '等待同步与持久化确认'}</span>
+      {state.local ? <span>{({ loading: '正在恢复本地日志', saving: '本地保存中', saved: '已保存在本地', full: '本地日志已满，暂停编辑', failed: '本地保存失败，暂停编辑' })[state.local]}</span> : null}
+      <button type="button" disabled={!document || state.connection === 'forbidden'} onClick={() => {
+        void session.exportFiles().then(value => {
+          const url = URL.createObjectURL(new Blob([value], { type: 'application/json' })), link = window.document.createElement('a')
+          link.href = url; link.download = `project-${session.identity.projectId}-local.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
+        }).catch(cause => setError(cause instanceof Error ? cause.message : '请恢复网络并验证项目权限后导出'))
+      }}>验证权限并导出本地包</button></header>
+    <ul className="v2-presence" aria-label="在线成员">{state.members?.map(member => <li key={`${member.userId}:${member.connectionId}`} style={{ borderColor: member.color }}>
+      {member.name}{member.clientId === doc.clientID ? '（本标签页）' : ''} · 连接 {member.connectionId.split('/')[0].slice(0, 8)}
+      {document?.files.find(f => f.id === member.activeFileId)?.path ? ` · ${document.files.find(f => f.id === member.activeFileId)!.path}` : ''}
+    </li>)}</ul>
+    {state.recoveries?.map(recovery => <div role="alert" className="v2-recovery" key={recovery.id}>
+      <p>{recovery.path} 被远端删除，当前内容已保留。可恢复为新文件或复制内容。</p>
+      <button type="button" disabled={!state.writable} onClick={() => {
+        const path = window.prompt('恢复文件路径（创建新文件）', recovery.path)
+        if (path) run(() => {
+          const id = session.mutate(d => {
+            const next = fileCommands(d, session.identity, () => true).create(path)
+            const content = d.getMap<Y.Map<unknown>>('files').get(next)!.get('content') as Y.Text
+            content.insert(0, recovery.code)
+            return next
+          }); setChosenId(id); session.dismissRecovery(recovery.id)
+        })
+      }}>恢复为新文件</button>
+      <button type="button" onClick={() => { void session.copyRecovery(recovery.id).then(() => setNotice('内容已复制')).catch(cause => setError(cause instanceof Error ? cause.message : '复制失败')) }}>复制当前内容</button>
+      <button type="button" onClick={() => session.dismissRecovery(recovery.id)}>放弃保留内容</button>
+    </div>)}
     {state.error || error ? <p className="v2-error" role="alert">{state.error || error}</p> : null}
     {notice ? <p className="v2-notice" role="status">{notice}</p> : null}
     {document?.conflicts.length ? <p role="status">同路径冲突已归一化：{document.conflicts.join('；')}</p> : null}

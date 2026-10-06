@@ -4,31 +4,97 @@ import { MonacoBinding } from 'y-monaco'
 import { LIMITS, type FileRecord } from '../../collaboration/document'
 import type { CollaborationSession } from '../../collaboration/session'
 import { languageFor, languageSession, modelUri, monaco } from './languages'
+import { presenceColors } from '../../collaboration/presenceColors'
 
 interface Props { session: CollaborationSession; files: FileRecord[]; activeId: string; writable: boolean }
 interface BoundModel { model: monaco.editor.ITextModel; binding: MonacoBinding; timer?: ReturnType<typeof setTimeout>; change: monaco.IDisposable; path: string; text: Y.Text; diagnose: () => void; view?: monaco.editor.ICodeEditorViewState | null }
 /** Imperative models avoid React renders for every keystroke; only Y.Text is authoritative. */
 export function MonacoWorkspace({ session, files, activeId, writable }: Props) {
   const host = useRef<HTMLDivElement>(null)
-  const runtime = useRef<{ editor: monaco.editor.IStandaloneCodeEditor; models: Map<string, BoundModel>; undo: Y.UndoManager; languages: ReturnType<typeof languageSession>; active?: string } | null>(null)
+  const runtime = useRef<{ editor: monaco.editor.IStandaloneCodeEditor; models: Map<string, BoundModel>; undo: Y.UndoManager; languages: ReturnType<typeof languageSession>; active?: string; renderPresence?: () => void } | null>(null)
   const [warning, setWarning] = useState('')
   useEffect(() => {
     const languages = languageSession()
     const editor = monaco.editor.create(host.current!, { theme: 'vs-dark', automaticLayout: true, minimap: { enabled: false }, readOnly: true,
-      fontSize: 14, tabSize: 2, wordWrap: 'on', ariaLabel: '协作代码编辑器', fixedOverflowWidgets: true })
+      fontSize: 14, tabSize: 2, wordWrap: 'on', cursorBlinking: 'blink', ariaLabel: '协作代码编辑器', fixedOverflowWidgets: true })
     const undo = new Y.UndoManager(session.doc.getMap('files'), { trackedOrigins: new Set([MonacoBinding]), captureTimeout: 400 })
-    const applyUndo = (redo: boolean) => { if (session.state.writable) { if (redo) undo.redo(); else undo.undo() } }
+    const applyUndo = (redo: boolean) => {
+      try { session.undo(undo, redo) } catch (cause) { setWarning(cause instanceof Error ? cause.message : '撤销失败') }
+    }
     editor.addAction({ id: 'undo', label: '撤销本地编辑', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ], run: () => applyUndo(false), contextMenuGroupId: '1_modification', contextMenuOrder: 1 })
     editor.addAction({ id: 'redo', label: '重做本地编辑', keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY], run: () => applyUndo(true), contextMenuGroupId: '1_modification', contextMenuOrder: 2 })
     // Saving is automatic; suppress the browser Save Page dialog.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {})
     runtime.current = { editor, models: new Map(), undo, languages }
+    const decorations = editor.createDecorationsCollection(), style = document.createElement('style')
+    document.head.append(style)
+    const cursorLabels = new Map<number, { widget: monaco.editor.IContentWidget; node: HTMLDivElement; position: monaco.IPosition }>()
+    const clearLabels = (visible: Set<number>) => {
+      for (const [id, label] of cursorLabels) if (!visible.has(id)) { editor.removeContentWidget(label.widget); cursorLabels.delete(id) }
+    }
+    const renderPresence = () => {
+      const model = editor.getModel(), current = runtime.current
+      if (!model || !current) { decorations.clear(); clearLabels(new Set()); return }
+      const bound = current.active ? current.models.get(current.active) : undefined
+      const next: monaco.editor.IModelDeltaDecoration[] = [], css: string[] = []
+      const visible = new Set<number>(), colors = presenceColors([session.userId, ...[...session.awareness.getStates().values()].map(state => state.user?.id).filter(Number.isSafeInteger)])
+      for (const [clientId, state] of session.awareness.getStates()) {
+        if (clientId === session.doc.clientID || state.activeFileId !== current.active || !state.selection || !bound) continue
+        try {
+          const anchor = Y.createAbsolutePositionFromRelativePosition(state.selection.anchor, session.doc)
+          const head = Y.createAbsolutePositionFromRelativePosition(state.selection.head, session.doc)
+          if (!anchor || !head || anchor.type !== bound.text || head.type !== bound.text) continue
+          const a = model.getPositionAt(Math.min(anchor.index, head.index)), b = model.getPositionAt(Math.max(anchor.index, head.index))
+          const color = colors.get(state.user?.id)
+          if (!color) continue
+          const position = model.getPositionAt(head.index), name = String(state.user?.name ?? '协作者')
+          visible.add(clientId)
+          let label = cursorLabels.get(clientId)
+          if (!label) {
+            const node = document.createElement('div'); node.className = 'v2-cursor-name'
+            const item = { node, position, widget: {
+              getId: () => `v2-cursor-name-${clientId}`, getDomNode: () => node, allowEditorOverflow: true,
+              getPosition: () => ({ position: item.position, preference: [monaco.editor.ContentWidgetPositionPreference.ABOVE, monaco.editor.ContentWidgetPositionPreference.BELOW] }),
+            } }
+            label = item; cursorLabels.set(clientId, item); editor.addContentWidget(item.widget)
+          }
+          label.position = position; label.node.textContent = name; label.node.style.color = color; label.node.style.borderColor = color
+          label.node.setAttribute('aria-label', `${name} 的光标`); editor.layoutContentWidget(label.widget)
+          css.push(`.v2-remote-${clientId}{background:${color.replace(')', ' / 0.18)')}}.v2-head-${clientId}{border-left:2px solid ${color};height:100%}`)
+          next.push({ range: new monaco.Range(a.lineNumber, a.column, b.lineNumber, b.column), options: {
+            className: `v2-remote-${clientId}`,
+            hoverMessage: { value: name.replace(/[\\`*_{}[\]()#+.!<>]/g, '\\$&') },
+          } })
+          next.push({ range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column), options: {
+            beforeContentClassName: `v2-remote-cursor v2-head-${clientId}`, showIfCollapsed: true,
+          } })
+        } catch { /* A relative position can disappear when its file is deleted. */ }
+      }
+      clearLabels(visible); decorations.set(next); style.textContent = css.join('\n')
+    }
+    runtime.current.renderPresence = renderPresence
+    let selectionTimer: ReturnType<typeof setTimeout> | undefined
+    const selection = editor.onDidChangeCursorSelection(() => {
+      clearTimeout(selectionTimer)
+      selectionTimer = setTimeout(() => {
+        const current = runtime.current, model = editor.getModel(), sel = editor.getSelection()
+        const bound = current?.active ? current.models.get(current.active) : undefined
+        if (model && sel && bound) session.setSelection({
+          anchor: Y.createRelativePositionFromTypeIndex(bound.text, model.getOffsetAt({ lineNumber: sel.selectionStartLineNumber, column: sel.selectionStartColumn })),
+          head: Y.createRelativePositionFromTypeIndex(bound.text, model.getOffsetAt({ lineNumber: sel.positionLineNumber, column: sel.positionColumn })),
+        })
+      }, 80)
+    })
+    session.awareness.on('change', renderPresence)
+    const presenceModel = editor.onDidChangeModel(renderPresence), presenceContent = editor.onDidChangeModelContent(renderPresence)
     return () => {
+      clearTimeout(selectionTimer); selection.dispose(); presenceModel.dispose(); presenceContent.dispose()
+      session.awareness.off('change', renderPresence); decorations.clear(); clearLabels(new Set()); style.remove()
       const current = runtime.current; runtime.current = null
       if (current) for (const item of current.models.values()) {
-        clearTimeout(item.timer); item.change.dispose(); item.binding.destroy(); monaco.editor.setModelMarkers(item.model, 'v2-language', []); item.model.dispose()
+        clearTimeout(item.timer); item.change.dispose(); item.binding.destroy(); session.forgetOrigin(item.binding); monaco.editor.setModelMarkers(item.model, 'v2-language', []); item.model.dispose()
       }
-      undo.destroy(); editor.dispose(); languages.dispose()
+      undo.destroy(); session.forgetOrigin(undo); editor.dispose(); languages.dispose()
     }
   }, [session])
   useEffect(() => {
@@ -39,7 +105,7 @@ export function MonacoWorkspace({ session, files, activeId, writable }: Props) {
     const ids = new Set(files.map(f => f.id))
     for (const [id, item] of models) if (!ids.has(id) || files.find(f => f.id === id)?.path !== item.path) {
       if (editor.getModel() === item.model) editor.setModel(null)
-      clearTimeout(item.timer); item.change.dispose(); item.binding.destroy(); monaco.editor.setModelMarkers(item.model, 'v2-language', []); item.model.dispose(); models.delete(id)
+      clearTimeout(item.timer); item.change.dispose(); item.binding.destroy(); session.forgetOrigin(item.binding); monaco.editor.setModelMarkers(item.model, 'v2-language', []); item.model.dispose(); models.delete(id)
     }
     for (const file of files) {
       let item = models.get(file.id)
@@ -65,11 +131,15 @@ export function MonacoWorkspace({ session, files, activeId, writable }: Props) {
             return
           }
           setWarning('')
-          session.doc.transact(() => {
-            for (const change of [...event.changes].sort((a, b) => b.rangeOffset - a.rangeOffset)) {
-              file.content.delete(change.rangeOffset, change.rangeLength); file.content.insert(change.rangeOffset, change.text)
-            }
-          }, binding)
+          try {
+            session.mutate(doc => {
+              const text = doc.getMap<Y.Map<unknown>>('files').get(file.id)!.get('content') as Y.Text
+              for (const change of [...event.changes].sort((a, b) => b.rangeOffset - a.rangeOffset)) {
+                text.delete(change.rangeOffset, change.rangeLength); text.insert(change.rangeOffset, change.text)
+              }
+            }, binding)
+            session.markEdited(file.id)
+          } catch (cause) { model.setValue(file.content.toString()); setWarning(cause instanceof Error ? cause.message : '修改未提交') }
         }))
         const listener = model.onDidChangeContent(() => {
           const nextLanguage = languageFor(file.language, model.getValue())
@@ -93,6 +163,7 @@ export function MonacoWorkspace({ session, files, activeId, writable }: Props) {
       current.active = activeId; current.undo.stopCapturing()
     }
     editor.updateOptions({ readOnly: !writable })
+    current.renderPresence?.()
   }, [session, files, activeId, writable])
   const active = files.find(f => f.id === activeId)
   const budgetExceeded = active && languageFor(active.language, active.content.toString()).startsWith('budget-')

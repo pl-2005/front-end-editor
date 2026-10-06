@@ -5,6 +5,15 @@ import { ApiError } from '../api/client'
 
 const mocks = vi.hoisted(() => ({ ticket: vi.fn(), providers: [] as { configuration: Record<string, (event: unknown) => void>; destroy: ReturnType<typeof vi.fn> }[], sockets: [] as { destroy: ReturnType<typeof vi.fn> }[] }))
 vi.mock('../api/collaboration', () => ({ issueTicket: mocks.ticket }))
+vi.mock('./offline', () => ({
+  OFFLINE_LIMIT: 1536 * 1024, cacheName: () => 'unit-session', clearOtherEpochs: async () => {}, purgeUserCaches: async () => {}, purgeProjectCaches: async () => {},
+  OfflineLog: class {
+    state = 'saved'; recoveryIds: string[] = []
+    constructor(_name: string, _identity: unknown, readonly status: (value: string) => void) {}
+    async load() { this.status('saved'); return 0 }
+    save() {} acknowledge() {} rememberRecoveries() {} async close() {} settled() { return Promise.resolve() }
+  },
+}))
 vi.mock('@hocuspocus/provider', () => ({
   HocuspocusProviderWebsocket: class {
     destroy = vi.fn(); connect = vi.fn().mockResolvedValue(undefined)

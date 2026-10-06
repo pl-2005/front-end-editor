@@ -2,7 +2,7 @@
 
 一个面向 HTML、CSS 和 JavaScript 的浏览器在线编辑器。V2 使用 Spring Boot 管理身份、团队授权和项目元数据，Hocuspocus 网关负责 Yjs 协作与自动持久化，MySQL 保存当前文档指针，MinIO 保存 Y.Doc 二进制。项目工作区使用 Monaco 编辑 Y.Text，Sandpack 单向派生预览和控制台。
 
-> V2 已完成 Step07：身份认证、团队授权、Y.Doc 存储、安全网关、自动持久化及 Monaco/Yjs/Sandpack 工作区。支持多文件编辑、HTML/CSS/JS 补全与诊断、文本撤销重做及同步/持久化状态确认。启动、内部协议与本机验收见 [collaboration/README.md](collaboration/README.md)。票据与网关开关默认关闭；离线日志与 Presence 留给 Step08，删除与主动撤权协调留给 Step09，公开入口在 Step11 开放。完整进度见 [docs/V__2/README.md](docs/V__2/README.md)。
+> V2 已完成 Step08：身份认证、团队授权、Y.Doc 存储、安全网关、自动持久化及 Monaco/Yjs/Sandpack 工作区。支持多文件编辑、HTML/CSS/JS 补全与诊断、文本撤销重做、有界离线日志与重新授权后重发、Presence/远端光标及删除冲突恢复。界面独立确认本地保存、连接同步与服务端持久化。启动、内部协议与本机验收见 [collaboration/README.md](collaboration/README.md)。票据与网关开关默认关闭；删除与主动撤权协调留给 Step09，公开入口在 Step11 开放。完整进度见 [docs/V__2/README.md](docs/V__2/README.md)。
 
 ## V1 功能记录
 
@@ -15,7 +15,7 @@
 - 版本历史：查看历史快照，并将任一历史内容恢复为一个新版本；
 - 存储维护：启动时初始化 MinIO Bucket，并定时清理无数据库引用的孤立快照。
 
-上述保存、草稿、版本历史和软删除流程记录 V1 行为。V2 通过协作网关自动保存当前 Y.Doc，不开放旧快照写入和版本历史接口；断线暂时只读，离线日志等待 Step08，协作项目删除等待 Step09。项目不支持 npm 依赖管理、服务端代码执行或 Git 集成。
+上述保存、草稿、版本历史和软删除流程记录 V1 行为。V2 通过协作网关自动保存当前 Y.Doc，不开放旧快照写入和版本历史接口；有效会话断线后使用有界本地日志继续编辑，重新授权后合并，撤权清理缓存。协作项目删除等待 Step09。项目不支持 npm 依赖管理、服务端代码执行或 Git 集成。
 
 ## 技术栈
 
@@ -133,7 +133,7 @@ Sandpack 在浏览器中编译和运行用户代码，后端不会执行项目�
 
 编辑内容同时保存在浏览器 IndexedDB 中。只有草稿基于服务端当前版本时才会自动恢复，旧版本草稿会保留提示，避免静默覆盖新内容。
 
-V2 使用 Y.Doc 作为内容事实源：有效 Update 在广播前验证，网关以 1 秒防抖、最长 5 秒延迟保存完整文档，并通过 generation CAS 切换当前指针。保存失败保留 pending 并暂停写入；离房和正常停机也 flush。同步与持久化是独立状态，不创建 revision 或用户历史版本。浏览器离线更新重发由 Step08 完成。
+V2 使用 Y.Doc 作为内容事实源：有效 Update 在广播前验证，网关以 1 秒防抖、最长 5 秒延迟保存完整文档，并通过 generation CAS 切换当前指针。保存失败保留 pending 并暂停写入；离房和正常停机也 flush。同步与持久化是独立状态，不创建 revision 或用户历史版本。浏览器按账号、项目和 epoch 保存有界离线更新，新票据重新授权后重发；旧 epoch 和撤权缓存不能写回。
 
 ## 默认地址
 
