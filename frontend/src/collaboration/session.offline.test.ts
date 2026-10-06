@@ -20,6 +20,25 @@ vi.mock('@hocuspocus/provider', () => ({
   },
 }))
 const sessions: CollaborationSession[] = []
+
+it('retains its local log and pauses editing on a temporary project fence', async () => {
+  const { session, callbacks } = await connected()
+  await session.flushLocal()
+  callbacks.onClose({ event: { code: 1000, reason: 'COLLAB_PROJECT_FENCED' } })
+  expect(session.state.writable).toBe(false)
+  expect(session.state.connection).not.toBe('forbidden')
+  expect(session.doc.getMap('meta').get('projectId')).toBe(7)
+  expect((await indexedDB.databases()).map(db => db.name)).toContain(cacheName(101, { projectId: 7, epoch: 1 }))
+})
+
+it('clears content and the local log on a Hocuspocus document revocation frame', async () => {
+  const { session, callbacks } = await connected()
+  await session.flushLocal()
+  callbacks.onClose({ event: { code: 1000, reason: 'COLLAB_USER_REVOKED' } })
+  expect(session.state.connection).toBe('forbidden')
+  expect(session.doc.getMap('files').size).toBe(0)
+  await vi.waitFor(async () => expect((await indexedDB.databases()).map(db => db.name)).not.toContain(cacheName(101, { projectId: 7, epoch: 1 })))
+})
 afterEach(async () => {
   for (const session of sessions) { await session.flushLocal(); session.destroy() }
   sessions.length = 0; await purgeUserCaches(101); mocks.providers.length = 0; vi.clearAllMocks()

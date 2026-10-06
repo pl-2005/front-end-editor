@@ -23,6 +23,7 @@ public class TeamService {
     private final AppUserRepository users;
     private final TeamAccessService access;
     private final EntityManager entityManager;
+    private final com.webeditor.collaboration.CollabControlEvents events;
     /**
      * 初始化组件依赖及配置，供后续业务方法使用。
      *
@@ -35,9 +36,11 @@ public class TeamService {
      * @param entityManager JPA 实体管理器
      */
     public TeamService(TeamRepository teams, TeamMemberRepository members, TeamInvitationRepository invitations,
-            TeamJoinRequestRepository requests, AppUserRepository users, TeamAccessService access, EntityManager entityManager) {
+            TeamJoinRequestRepository requests, AppUserRepository users, TeamAccessService access, EntityManager entityManager,
+            com.webeditor.collaboration.CollabControlEvents events) {
         this.teams = teams; this.members = members; this.invitations = invitations;
         this.requests = requests; this.users = users; this.access = access; this.entityManager = entityManager;
+        this.events = events;
     }
     public record TeamView(long id, String name, String description, String joinPolicy) {
         /**
@@ -349,6 +352,7 @@ public class TeamService {
         TeamMember member = access.member(teamId, userId);
         if ("OWNER".equals(member.getRole())) throw conflict("请先转移团队所有权");
         member.remove(); bump(userId);
+        revoked(userId, teamId);
     }
     /**
      * 要求所有者权限，在团队锁内移除普通成员并更新其授权版本。
@@ -364,6 +368,7 @@ public class TeamService {
         TeamMember member = access.member(teamId, memberId);
         if ("OWNER".equals(member.getRole())) throw conflict("不能移除当前所有者");
         member.remove(); bump(memberId);
+        revoked(memberId, teamId);
     }
     /**
      * 在团队锁内将所有权转交给另一有效成员，先刷新旧所有者角色，再更新双方授权版本。
@@ -410,6 +415,12 @@ public class TeamService {
      *
      * @param userId 用户 ID
      */
+    private void revoked(long userId, long teamId) {
+        entityManager.flush();
+        long version = ((Number) entityManager.createNativeQuery("SELECT authz_version FROM app_user WHERE id=?")
+                .setParameter(1, userId).getSingleResult()).longValue();
+        events.revoked(userId, teamId, version);
+    }
     private void bump(long userId) {
         if (users.incrementAuthzVersion(userId) != 1) throw new TeamFailure(404, "USER_NOT_FOUND", "用户不存在");
     }

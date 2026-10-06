@@ -79,6 +79,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/health", "/api/health/readiness", "/api/teams/discover").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
                         // The internal controller authenticates bounded raw bodies with its separate HMAC key.
+                        .requestMatchers(HttpMethod.GET, "/internal/collaboration/operations/*").permitAll()
                         .requestMatchers("/internal/collaboration/projects/**", "/internal/collaboration/tickets/consume",
                                 "/internal/collaboration/connections/revalidate").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/projects/*/collab-ticket").authenticated()

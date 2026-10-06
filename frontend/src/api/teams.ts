@@ -224,11 +224,15 @@ export const updateTeamProject = (teamId: number, project: TeamProjectSummary, n
   body: JSON.stringify({ name, description: project.description, template: project.template }),
 })
 /**
- * 携带元数据 If-Match 请求删除；当前后端会返回协作删除协调冲突。
+ * 携带元数据 If-Match 协调软删除；提交成功后清理该项目本地缓存。
  *
  * @param teamId 团队 ID
  * @param project 项目实体或摘要
  */
-export const deleteTeamProject = (teamId: number, project: TeamProjectSummary) => request<void>(`${projects(teamId)}/${project.id}`, {
-  method: 'DELETE', headers: { 'If-Match': `"project-${project.id}-${project.stateVersion}"` },
-})
+export async function deleteTeamProject(teamId: number, project: TeamProjectSummary) {
+  const userId = getAuthUser()?.id
+  await request<void>(`${projects(teamId)}/${project.id}`, {
+    method: 'DELETE', headers: { 'If-Match': `"project-${project.id}-${project.stateVersion}"` },
+  })
+  if (userId) await purgeProjectCaches(userId, project.id)
+}

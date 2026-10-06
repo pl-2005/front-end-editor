@@ -34,12 +34,16 @@ public class CollabTicketService {
     }
     private void enabled() { if (!enabled) throw new CollabFailure(503, "COLLAB_TICKETS_DISABLED"); }
     private State state(long projectId, long userId) {
-        return jdbc.query(STATE, (rs, row) -> new State(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getString(4), rs.getString(5)),
+        State state = jdbc.query(STATE, (rs, row) -> new State(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getString(4), rs.getString(5)),
                 projectId, userId).stream().findFirst().orElseThrow(() -> new CollabFailure(403, "COLLAB_FORBIDDEN"));
+        if (jdbc.queryForObject("SELECT COUNT(*) FROM collab_operation WHERE project_id=? AND state='PREPARED'", Long.class, projectId) > 0)
+            throw new CollabFailure(503, "COLLAB_PROJECT_FENCED");
+        return state;
     }
     @Transactional
     public Ticket issue(long projectId, long userId) {
-        enabled(); State state = state(projectId, userId);
+        enabled();
+        State state = state(projectId, userId);
         byte[] bytes = new byte[32]; random.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         Instant now = Instant.now(), expires = now.plusSeconds(60);

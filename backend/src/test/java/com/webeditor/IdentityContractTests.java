@@ -71,7 +71,12 @@ class IdentityContractTests {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("USERNAME_ALREADY_EXISTS"));
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"login\":\"" + username + "\",\"password\":\"wrong-password\"}"))
-                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"));
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+                .andExpect(jsonPath("$.message").value("用户名或密码错误"));
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"login\":\"missing-contract-account\",\"password\":\"wrong-password\"}"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("INVALID_CREDENTIALS"))
+                .andExpect(jsonPath("$.message").value("用户名或密码错误"));
         when(refresh.create(anyLong(), anyLong())).thenReturn("test-refresh");
         var login = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"login\":\"" + username + "\",\"password\":\"correct-horse-battery\"}"))
@@ -80,7 +85,9 @@ class IdentityContractTests {
         String token = mapper.readTree(login.getResponse().getContentAsByteArray()).path("data").path("accessToken").asText();
         assertThat(decoder.decode(token).getHeaders().get("alg")).isEqualTo("HS256");
         assertThat(decoder.decode(token).getHeaders()).doesNotContainKey("kid");
-        mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTHENTICATION_REQUIRED"))
+                .andExpect(jsonPath("$.message").value("需要登录"));
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.username").value(username));
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token)

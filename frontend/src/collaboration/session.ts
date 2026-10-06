@@ -168,7 +168,11 @@ export class CollaborationSession {
         onAuthenticationFailed: () => { if (current()) this.retry(attempt) },
         onClose: ({ event }) => {
           if (!current()) return
-          if (event.code === 4403) this.forbid()
+          // Hocuspocus 4.7 document CLOSE frames are surfaced with code 1000 and the server reason.
+          if (event.code === 4403 || ['COLLAB_USER_REVOKED', 'COLLAB_PROJECT_DELETED', 'COLLAB_AUTHORIZATION_EXPIRED'].includes(event.reason ?? '')) this.forbid()
+          else if (event.code === 4410 || event.reason === 'COLLAB_PROJECT_FENCED') {
+            this.paused = true; this.set({ connection: 'failed', writable: false, synced: false, error: '项目正在处理，请等待后重试' }); this.retry(attempt)
+          }
           else if (event.reason?.includes('COLLAB_UPDATE_')) {
             this.set({ connection: 'failed', writable: false, synced: false, error: '编辑未被网关接受，请重新打开项目' })
             this.attempt++; this.releaseTransport()

@@ -26,6 +26,7 @@ public class TeamProjectController {
     private final ProjectService service;
     private final CollabProjectService collabProjects;
     private final CollabPersistenceService persistence;
+    private final CollabDeleteService deletes;
     /**
      * 初始化组件依赖及配置，供后续业务方法使用。
      *
@@ -36,9 +37,9 @@ public class TeamProjectController {
      * @param persistence 协作文档持久化服务
      */
     public TeamProjectController(TeamAccessService access, ProjectRepository projects, ProjectService service,
-            CollabProjectService collabProjects, CollabPersistenceService persistence) {
+            CollabProjectService collabProjects, CollabPersistenceService persistence, CollabDeleteService deletes) {
         this.access = access; this.projects = projects; this.service = service;
-        this.collabProjects = collabProjects; this.persistence = persistence;
+        this.collabProjects = collabProjects; this.persistence = persistence; this.deletes = deletes;
     }
     /**
      * 按成员权限创建并初始化团队协作项目，返回 201、摘要和元数据 ETag。
@@ -126,7 +127,7 @@ public class TeamProjectController {
         return ResponseEntity.ok().header(HttpHeaders.ETAG, etag(projectId, result.stateVersion())).body(ApiResponse.ok(result));
     }
     /**
-     * 验证项目访问权限后返回删除协调冲突；当前协作项目删除尚未开放。
+     * 持久化并冻结协作房间后软删除项目；重复请求返回相同提交结果。
      *
      * @param teamId 团队 ID
      * @param projectId 项目 ID
@@ -135,8 +136,8 @@ public class TeamProjectController {
     @DeleteMapping("/{projectId}")
     ResponseEntity<Void> delete(@PathVariable @Min(1) long teamId, @PathVariable @Min(1) long projectId,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch) {
-        access.project(teamId, projectId, CurrentUser.id());
-        throw new CollabFailure(409, "COLLAB_DELETE_COORDINATION_REQUIRED");
+        deletes.delete(teamId, projectId, CurrentUser.id(), version(projectId, ifMatch));
+        return ResponseEntity.noContent().build();
     }
     /**
      * 由项目 ID 和元数据锁版本生成强 ETag。

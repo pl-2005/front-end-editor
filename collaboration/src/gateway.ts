@@ -5,6 +5,7 @@ import { removeAwarenessStates } from 'y-protocols/awareness'
 import { LIMITS, loadDocument } from './document.js'
 import { SpringApi, NonceStore, authenticateInternal, InternalFailure, type Identity, type Authorization } from './internal.js'
 import { Room } from './room.js'
+import { ControlStore, type ControlEvent, type Fence } from './control.js'
 
 type Context = { identity: Identity; authorization: Authorization; expires: number; closed: boolean; key: string;
   rateStart: number; messages: number; bytes: number; leaseTimer?: NodeJS.Timeout; renewTimer?: NodeJS.Timeout; awarenessId?: number }
@@ -45,6 +46,28 @@ export function createGateway(options: GatewayOptions) {
   const api = new SpringApi(options.springUrl, options.storageSecret), nonces = new NonceStore(options.noncePath)
   if (Buffer.byteLength(options.gatewaySecret) < 32 || options.gatewaySecret === options.storageSecret) throw new InternalFailure('COLLAB_INTERNAL_UNCONFIGURED')
   const rooms = new Map<string, Room>(), claims = new Map<string, string>(), awarenessOwners = new Map<string, Map<number, string>>()
+  const controls = new ControlStore(options.noncePath)
+  const fences = new Map<number, Fence>(controls.fences().map(f => [f.projectId, f]))
+  const connections = new Map<string, { context: Context; connection: Connection<Context> }>()
+  const requireUnfenced = (projectId: number) => {
+    if (fences.has(projectId)) throw new InternalFailure('COLLAB_PROJECT_FENCED', 503)
+  }
+  const checkControl = async (projectId: number, epoch: number) => {
+    const state = await api.control(projectId)
+    if (state.projectId !== projectId || state.epoch !== epoch || state.state === 'DELETED')
+      throw new InternalFailure('COLLAB_EPOCH_CONFLICT', 409)
+    if (state.state === 'FENCED') throw new InternalFailure('COLLAB_PROJECT_FENCED', 503)
+    // An ABORTED operation can be proven after restart even if its event ACK was lost.
+    const local = fences.get(projectId)
+    if (local) {
+      const op = await api.operation(local.operationId)
+      if (op.projectId === projectId && op.state === 'ABORTED' && fences.get(projectId)?.operationId === local.operationId) {
+        controls.remove(projectId, local.operationId); fences.delete(projectId)
+        for (const room of rooms.values()) if (room.pointer.projectId === projectId) room.setFence(false)
+      }
+    }
+    requireUnfenced(projectId)
+  }
   let loading = 0, stopping = false
   let stopPromise: Promise<void> | undefined
   const sockets = new Set<import('node:stream').Duplex>()
@@ -56,9 +79,9 @@ export function createGateway(options: GatewayOptions) {
   }
   const armLease = (context: Context, connection: Connection<Context>) => {
     clearTimeout(context.leaseTimer); clearTimeout(context.renewTimer)
-    const close = () => {
-      context.closed = true; clearTimeout(context.renewTimer)
-      connection.readOnly = true; connection.close({ code: 4403, reason: 'COLLAB_AUTHORIZATION_EXPIRED' })
+    const close = (temporary = false) => {
+      context.closed = true; clearTimeout(context.leaseTimer); clearTimeout(context.renewTimer)
+      connection.readOnly = true; connection.close({ code: temporary ? 4410 : 4403, reason: temporary ? 'COLLAB_PROJECT_FENCED' : 'COLLAB_AUTHORIZATION_EXPIRED' })
     }
     context.leaseTimer = setTimeout(close, Math.max(0, context.expires - performance.now()))
     context.renewTimer = setTimeout(async () => {
@@ -67,7 +90,7 @@ export function createGateway(options: GatewayOptions) {
         await api.revalidate(context.authorization)
         if (context.closed || performance.now() >= context.expires || started + 5000 <= performance.now()) { close(); return }
         context.expires = started + 5000; armLease(context, connection)
-      } catch { close() }
+      } catch (error) { close(error instanceof InternalFailure && error.code === 'COLLAB_PROJECT_FENCED') }
     }, Math.max(0, context.expires - performance.now() - 1500))
   }
   const server = new Server<Context>({
@@ -98,12 +121,14 @@ export function createGateway(options: GatewayOptions) {
     async onAuthenticate({ token, documentName, socketId, requestHeaders }) {
       requireOrigin(requestHeaders.get('origin'))
       const target = parseRoom(documentName), key = `${socketId}/${documentName}`
+      await checkControl(target.projectId, target.epoch)
       if (claims.size >= options.maxConnections || [...claims.values()].filter(name => name === documentName).length >= options.maxRoomConnections)
         throw new InternalFailure('COLLAB_CONNECTION_LIMIT', 503)
       claims.set(key, documentName)
       const started = performance.now()
       try {
         const { identity, authorization } = await api.consume(token, target.projectId, target.epoch)
+        await checkControl(target.projectId, target.epoch)
         if (identity.projectId !== target.projectId || identity.epoch !== target.epoch || authorization.userId !== identity.userId
           || authorization.projectId !== target.projectId || authorization.epoch !== target.epoch || performance.now() >= started + 5000)
           throw new InternalFailure('COLLAB_TICKET_INVALID', 401)
@@ -112,6 +137,7 @@ export function createGateway(options: GatewayOptions) {
     },
     async onLoadDocument({ documentName, document, context }) {
       const identity = parseRoom(documentName)
+      await checkControl(identity.projectId, identity.epoch)
       if (rooms.size + loading >= options.maxRooms || process.memoryUsage().rss >= options.maxMemoryBytes) {
         claims.delete(context.key); throw new InternalFailure('COLLAB_MEMORY_LIMIT', 503)
       }
@@ -127,6 +153,7 @@ export function createGateway(options: GatewayOptions) {
           }
         }
         if (!bytes) throw new InternalFailure('COLLAB_GENERATION_CONFLICT', 409)
+        requireUnfenced(identity.projectId)
         const doc = loadDocument(bytes, identity)
         try { document.merge(doc) } finally { doc.destroy() }
         const room = new Room(document, pointer, api, state => {
@@ -135,13 +162,21 @@ export function createGateway(options: GatewayOptions) {
           if ('status' in state && state.status === 'durable' && document.getConnectionsCount() === 0)
             setTimeout(() => { void server.hocuspocus.unloadDocument(document).catch(() => {}) }, 0)
         },
-          () => server.hocuspocus.closeConnections(documentName))
+          () => {
+            for (const { context, connection } of connections.values()) if (claims.get(context.key) === documentName) {
+              context.closed = true; clearTimeout(context.leaseTimer); clearTimeout(context.renewTimer)
+              connection.readOnly = true; connection.close({ code: 4403, reason: 'COLLAB_PROJECT_DELETED' })
+            }
+            server.hocuspocus.closeConnections(documentName)
+          })
         rooms.set(documentName, room); awarenessOwners.set(documentName, new Map())
       } catch (error) { claims.delete(context.key); throw error }
       finally { loading-- }
     },
     async connected({ context, connection, documentName }) {
+      requireUnfenced(context.identity.projectId)
       writable(context); armLease(context, connection)
+      connections.set(context.key, { context, connection })
       connection.sendStateless(JSON.stringify({ type: 'ready', identity: { ...context.identity, connectionId: context.key } }))
       const room = rooms.get(documentName)
       if (room) connection.sendStateless(JSON.stringify(room.state()))
@@ -218,6 +253,7 @@ export function createGateway(options: GatewayOptions) {
     async onDisconnect({ context, documentName, document }) {
       if (!context) return
       context.closed = true; clearTimeout(context.leaseTimer); clearTimeout(context.renewTimer); claims.delete(context.key)
+      connections.delete(context.key)
       if (context.awarenessId !== undefined) awarenessOwners.get(documentName)?.delete(context.awarenessId)
       if (document.getConnectionsCount() === 0) await rooms.get(documentName)?.flush().catch(() => {})
     },
@@ -231,22 +267,86 @@ export function createGateway(options: GatewayOptions) {
     },
     async onRequest({ request, response }) {
       try {
-        const match = /^\/internal\/collaboration\/projects\/([1-9]\d*)\/flush$/.exec(request.url ?? '')
-        if (!match || request.method !== 'POST') { response.writeHead(404).end(); throw null }
+        const match = /^\/internal\/collaboration\/projects\/([1-9]\d*)\/(flush|fence)$/.exec(request.url ?? '')
+        const control = request.url === '/internal/collaboration/control'
+        if ((!match && !control) || request.method !== 'POST') { response.writeHead(404).end(); throw null }
         let size = 0; const chunks: Buffer[] = []
         for await (const chunk of request) { size += chunk.length; if (size > 4096) throw new InternalFailure('COLLAB_MESSAGE_TOO_LARGE', 413); chunks.push(chunk) }
-        authenticateInternal(request, Buffer.concat(chunks), options.gatewaySecret, 'gateway', nonces)
-        const id = Number(match[1]); if (!Number.isSafeInteger(id)) throw new InternalFailure('COLLAB_ROOM_INVALID', 400)
+        const body = Buffer.concat(chunks)
+        authenticateInternal(request, body, options.gatewaySecret, 'gateway', nonces)
         if (!options.enabled || stopping) throw new InternalFailure('COLLAB_GATEWAY_DISABLED')
+        if (control) {
+          const e = JSON.parse(body.toString()) as ControlEvent
+          if (!e || typeof e.id !== 'string' || typeof e.aggregateId !== 'string' || !Number.isSafeInteger(e.aggregateSequence) || e.aggregateSequence < 1)
+            throw new InternalFailure('COLLAB_CONTROL_INVALID', 400)
+          if (!controls.seen(e)) {
+            if (e.eventType === 'USER_REVOKED') {
+              if (!Number.isSafeInteger(e.userId) || !Number.isSafeInteger(e.authzVersion) || e.aggregateId !== `user:${e.userId}`)
+                throw new InternalFailure('COLLAB_CONTROL_INVALID', 400)
+              // authzVersion is a global user waterline: close all stale sessions for that user.
+              for (const { context, connection } of connections.values()) if (context.identity.userId === e.userId && context.authorization.authzVersion < e.authzVersion!) {
+                context.closed = true; clearTimeout(context.leaseTimer); clearTimeout(context.renewTimer)
+                connection.readOnly = true; connection.close({ code: 4403, reason: 'COLLAB_USER_REVOKED' })
+              }
+            } else if (['PROJECT_DELETED', 'OPERATION_ABORTED'].includes(e.eventType)) {
+              if (!Number.isSafeInteger(e.projectId) || typeof e.operationId !== 'string' || !/^[a-f0-9-]{36}$/.test(e.operationId)
+                || e.aggregateId !== `project:${e.projectId}`) throw new InternalFailure('COLLAB_CONTROL_INVALID', 400)
+              const op = await api.operation(e.operationId)
+              if (op.projectId !== e.projectId || op.state !== (e.eventType === 'PROJECT_DELETED' ? 'COMMITTED' : 'ABORTED'))
+                throw new InternalFailure('COLLAB_OPERATION_UNKNOWN')
+              if (e.eventType === 'PROJECT_DELETED') {
+                const fence = controls.prepare(e.projectId!, e.operationId, op.expectedEpoch)
+                fences.set(e.projectId!, fence)
+                for (const room of rooms.values()) if (room.pointer.projectId === e.projectId) room.deleted()
+                for (const { context, connection } of connections.values()) if (context.identity.projectId === e.projectId) {
+                  context.closed = true; connection.readOnly = true; connection.close({ code: 4403, reason: 'COLLAB_PROJECT_DELETED' })
+                }
+              } else if (fences.get(e.projectId!)?.operationId === e.operationId) {
+                controls.remove(e.projectId!, e.operationId); fences.delete(e.projectId!)
+                for (const room of rooms.values()) if (room.pointer.projectId === e.projectId) room.setFence(false)
+              }
+            } else throw new InternalFailure('COLLAB_CONTROL_INVALID', 400)
+            // Persist only after applying the action. Crash before this line safely repeats it.
+            controls.acknowledge(e)
+          }
+          response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: e.id, aggregateSequence: e.aggregateSequence }))
+          throw null
+        }
+        const id = Number(match![1]); if (!Number.isSafeInteger(id)) throw new InternalFailure('COLLAB_ROOM_INVALID', 400)
+        let fence: Fence | undefined
+        if (match![2] === 'fence') {
+          const input = JSON.parse(body.toString())
+          if (!input || typeof input.operationId !== 'string' || !/^[a-f0-9-]{36}$/.test(input.operationId)) throw new InternalFailure('COLLAB_CONTROL_INVALID', 400)
+          const op = await api.operation(input.operationId)
+          if (op.projectId !== id || op.state !== 'PREPARED') throw new InternalFailure('COLLAB_OPERATION_UNKNOWN')
+          const existing = fences.get(id)
+          if (existing && existing.operationId !== op.id) {
+            const prior = await api.operation(existing.operationId)
+            if (prior.state !== 'ABORTED') throw new InternalFailure('COLLAB_PROJECT_FENCED')
+            // Check again after awaiting: another fence may have acquired this project.
+            if (fences.get(id)?.operationId !== existing.operationId) throw new InternalFailure('COLLAB_PROJECT_FENCED')
+            controls.remove(id, existing.operationId); fences.delete(id)
+          }
+          fence = controls.prepare(id, op.id, op.expectedEpoch); fences.set(id, fence)
+          for (const room of rooms.values()) if (room.pointer.projectId === id) room.setFence(true)
+        } else requireUnfenced(id)
         const pointer = await api.describe(id)
+        if (fence && pointer.epoch !== fence.epoch) throw new InternalFailure('COLLAB_EPOCH_CONFLICT', 409)
         if ([...rooms.values()].some(room => room.pointer.projectId === id && room.pointer.epoch !== pointer.epoch && !room.canUnload()))
           throw new InternalFailure('COLLAB_EPOCH_CONFLICT', 409)
         const room = rooms.get(`project:${id}:epoch:${pointer.epoch}`)
         const saved = room ? await room.flush() : pointer
-        response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ projectId: id, epoch: saved.epoch,
+        if (fence) {
+          if (room && !room.canUnload()) throw new InternalFailure('COLLAB_UNDURABLE_ROOM')
+          const current = await api.operation(fence.operationId)
+          if (current.state !== 'PREPARED' || fences.get(id)?.operationId !== fence.operationId)
+            throw new InternalFailure('COLLAB_OPERATION_UNKNOWN')
+          fence = controls.durable(fence, saved, room?.durableSequence ?? 0); fences.set(id, fence)
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(fence ?? { projectId: id, epoch: saved.epoch,
           generation: saved.generation, contentHash: saved.contentHash, durableSequence: room?.durableSequence ?? 0 }))
       } catch (error) {
-        if (error !== null) response.writeHead(error instanceof InternalFailure ? error.status : 503).end(JSON.stringify({ code: 'COLLAB_FLUSH_FAILED' }))
+        if (error !== null) response.writeHead(error instanceof InternalFailure ? error.status : 503).end(JSON.stringify({ code: 'COLLAB_CONTROL_FAILED' }))
       }
       throw null
     },
@@ -260,7 +360,7 @@ export function createGateway(options: GatewayOptions) {
         await Promise.all([...rooms.values()].map(room => room.flush()))
         await server.destroy()
         for (const socket of sockets) socket.destroy()
-        nonces.close()
+        nonces.close(); controls.close()
       })().catch(error => { stopPromise = undefined; throw error })
     },
   }

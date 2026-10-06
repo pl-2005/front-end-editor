@@ -53,4 +53,39 @@ public class CollabGatewayClient {
             Thread.currentThread().interrupt(); throw new CollabFailure(503, "COLLAB_FLUSH_FAILED");
         } catch (java.io.IOException | IllegalArgumentException e) { throw new CollabFailure(503, "COLLAB_FLUSH_FAILED"); }
     }
+    public record Fence(long projectId, String operationId, long epoch, long generation, String contentHash,
+            long durableSequence, String fenceToken) {}
+    public record Ack(String id, long aggregateSequence) {}
+    public Fence fence(long projectId, String operationId) {
+        Fence ack = request("/internal/collaboration/projects/" + projectId + "/fence", java.util.Map.of("operationId", operationId), Fence.class);
+        if (ack.projectId() != projectId || !operationId.equals(ack.operationId()) || ack.epoch() < 1 || ack.generation() < 1
+                || ack.durableSequence() < 0 || ack.contentHash() == null || !ack.contentHash().matches("[a-f0-9]{64}")
+                || ack.fenceToken() == null || !ack.fenceToken().matches("[a-f0-9]{64}"))
+            throw new CollabFailure(503, "COLLAB_FENCE_FAILED");
+        return ack;
+    }
+    public void control(CollabControlEvents.Event event) {
+        Ack ack = request("/internal/collaboration/control", event, Ack.class);
+        if (!event.id().equals(ack.id()) || ack.aggregateSequence() != event.aggregateSequence())
+            throw new CollabFailure(503, "COLLAB_CONTROL_ACK_INVALID");
+    }
+    private <T> T request(String path, Object value, Class<T> type) {
+        if (!enabled) throw new CollabFailure(503, "COLLAB_GATEWAY_DISABLED");
+        String timestamp = Long.toString(Instant.now().getEpochSecond()), nonce = UUID.randomUUID().toString();
+        try {
+            byte[] body = json.writeValueAsBytes(value);
+            var request = HttpRequest.newBuilder(URI.create(baseUrl + path)).timeout(Duration.ofSeconds(15))
+                    .header("Content-Type", "application/json").header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", nonce)
+                    .header("X-Collab-Signature", InternalHmac.sign(secret, "POST", path, "gateway", timestamp, nonce, body))
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
+            var response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (var stream = response.body()) {
+                byte[] bytes = stream.readNBytes(8193);
+                if (response.statusCode() != 200 || bytes.length > 8192) throw new CollabFailure(503, "COLLAB_CONTROL_FAILED");
+                return json.readValue(bytes, type);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); throw new CollabFailure(503, "COLLAB_CONTROL_FAILED");
+        } catch (java.io.IOException | IllegalArgumentException e) { throw new CollabFailure(503, "COLLAB_CONTROL_FAILED"); }
+    }
 }

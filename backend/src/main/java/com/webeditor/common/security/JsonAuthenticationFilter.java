@@ -88,7 +88,7 @@ public class JsonAuthenticationFilter extends OncePerRequestFilter {
             response.setHeader("Retry-After", Long.toString(e.retryAfter()));
             errors.write(request, response, 429, "AUTH_RATE_LIMITED");
         } catch (BadCredentialsException | AuthFailure e) {
-            errors.write(request, response, 401, "AUTHENTICATION_REQUIRED");
+            errors.write(request, response, 401, "INVALID_CREDENTIALS");
         } catch (Exception e) {
             errors.write(request, response, 503, "AUTH_SERVICE_UNAVAILABLE");
         } finally { SecurityContextHolder.clearContext(); }

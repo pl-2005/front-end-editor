@@ -19,6 +19,7 @@ import com.webeditor.project.repository.ProjectRevisionRepository;
 import com.webeditor.storage.StorageException;
 import com.webeditor.team.application.TeamService;
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
@@ -46,9 +47,12 @@ class CollaborationStorageTests {
     @Autowired CollabProjectService creation;
     @Autowired CollabPersistenceService persistence;
     @Autowired CollabTicketService tickets;
+    @Autowired CollabDeleteService deletes;
+    @Autowired com.webeditor.identity.application.AuthService authService;
     @MockitoBean CollabGatewayClient gateway;
     @Autowired CollabBackupService backups;
     @MockitoSpyBean CollabStore store;
+    @MockitoSpyBean CollabControlEvents events;
     @Autowired ProjectRepository projects;
     @Autowired ProjectRevisionRepository revisions;
     @Autowired AppUserRepository users;
@@ -103,7 +107,7 @@ class CollaborationStorageTests {
                 .andExpect(jsonPath("$.data.version").doesNotExist()).andExpect(jsonPath("$.data.files").doesNotExist())
                 .andExpect(jsonPath("$.data.collaboration.objectKey").doesNotExist());
         mvc.perform(delete("/api/teams/{team}/projects/{id}", teamId, id).header("Authorization", bearer()))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("COLLAB_DELETE_COORDINATION_REQUIRED"));
+                .andExpect(status().isPreconditionRequired());
     }
     @Test void failedUploadLeavesInvisibleInitializingProjectAndRetryCanActivateIt() throws Exception {
         doThrow(new StorageException("unavailable")).when(storage).put(anyString(), any());
@@ -272,6 +276,126 @@ class CollaborationStorageTests {
         long copied = creation.copy(teamId, owner.getId(), id, "Latest copy").id();
         var expected = persistence.describe(id);
         verify(initializer).copy(eq(copied), eq(expected), aryEq(new byte[]{91}));
+    }
+    private void acknowledgeDelete(long id) {
+        when(gateway.fence(eq(id), anyString())).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            var pointer = persistence.describe(id);
+            return new CollabGatewayClient.Fence(id, call.getArgument(1), pointer.epoch(), pointer.generation(),
+                    pointer.contentHash(), 0, "a".repeat(64));
+        });
+    }
+    @Test void deleteFlushesLatestStateRetainsOriginalObjectAndIsIdempotent() throws Exception {
+        long id = create(); var before = persistence.describe(id);
+        long version = projects.findById(id).orElseThrow().getLockVersion();
+        var oldTicket = tickets.issue(id, owner.getId());
+        when(gateway.fence(eq(id), anyString())).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            var pointer = persistence.persist(id, 1, 1, "delete-flush", new byte[]{42});
+            return new CollabGatewayClient.Fence(id, call.getArgument(1), 1, pointer.generation(), pointer.contentHash(), 1, "b".repeat(64));
+        });
+        String path = "/api/teams/" + teamId + "/projects/" + id;
+        mvc.perform(delete(path).header("Authorization", bearer()).header("If-Match", "\"project-" + id + "-" + version + "\""))
+                .andExpect(status().isNoContent());
+        var retained = store.find(id).orElseThrow();
+        assertThat(retained.epoch()).isEqualTo(2); assertThat(retained.generation()).isEqualTo(2);
+        assertThat(retained.objectKey()).contains("/epochs/1/"); assertThat(objects.get(retained.objectKey())).containsExactly((byte) 42);
+        assertThat(store.referenced(retained.objectKey(), Instant.now())).isTrue();
+        assertThat(projects.findById(id).orElseThrow().getStatus()).isZero();
+        assertThatThrownBy(() -> persistence.describe(id)).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> persistence.load(id, before.epoch(), before.generation())).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> persistence.persist(id, 1, 2, "late", new byte[]{43})).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> tickets.consume(oldTicket.ticket(), id, 1)).isInstanceOf(CollabFailure.class);
+        mvc.perform(delete(path).header("Authorization", bearer()).header("If-Match", "\"project-" + id + "-" + version + "\""))
+                .andExpect(status().isNoContent());
+        verify(gateway, times(1)).fence(eq(id), anyString());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM collab_control_event WHERE project_id=? AND event_type='PROJECT_DELETED'", Long.class, id)).isEqualTo(1);
+        assertThat(revisions.findAllByProjectIdOrderByVersionDesc(id)).isEmpty();
+    }
+    @Test void missingFenceAckLeavesPreparedAndReconciliationCanAbortThenRetry() {
+        long id = create(); var pointer = persistence.describe(id);
+        long version = projects.findById(id).orElseThrow().getLockVersion();
+        when(gateway.fence(eq(id), anyString())).thenThrow(new CollabFailure(503, "COLLAB_FENCE_FAILED"));
+        assertThatThrownBy(() -> deletes.delete(teamId, id, owner.getId(), version)).isInstanceOf(CollabFailure.class);
+        assertThat(projects.findById(id).orElseThrow().getStatus()).isEqualTo((byte) 1);
+        assertThat(persistence.describe(id)).isEqualTo(pointer);
+        assertThatThrownBy(() -> tickets.issue(id, owner.getId())).isInstanceOfSatisfying(CollabFailure.class, e -> assertThat(e.status()).isEqualTo(503));
+        String operation = deletes.control(id).operationId();
+        acknowledgeDelete(id);
+        jdbc.update("UPDATE collab_operation SET lease_until=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), operation);
+        new CollabControlDispatcher(jdbc, gateway, deletes, true).reconcile();
+        assertThat(deletes.operation(operation).state()).isEqualTo("ABORTED");
+        assertThat(deletes.control(id).state()).isEqualTo("ACTIVE");
+        deletes.delete(teamId, id, owner.getId(), version);
+        assertThat(deletes.control(id).state()).isEqualTo("DELETED");
+    }
+    @Test void databaseFailureRollsBackDeleteAndWritesAbortEvent() {
+        long id = create(); var pointer = persistence.describe(id); acknowledgeDelete(id);
+        long version = projects.findById(id).orElseThrow().getLockVersion();
+        CollabControlEvents target = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(events);
+        doThrow(new IllegalStateException("simulated commit failure")).when(target).operation(eq(id), anyLong(), anyLong(), anyString(), eq(true));
+        assertThatThrownBy(() -> deletes.delete(teamId, id, owner.getId(), version)).isInstanceOf(IllegalStateException.class);
+        assertThat(projects.findById(id).orElseThrow().getStatus()).isEqualTo((byte) 1);
+        assertThat(persistence.describe(id)).isEqualTo(pointer);
+        assertThat(jdbc.queryForObject("SELECT state FROM collab_operation WHERE project_id=?", String.class, id)).isEqualTo("ABORTED");
+        assertThat(jdbc.queryForObject("SELECT event_type FROM collab_control_event WHERE project_id=?", String.class, id)).isEqualTo("OPERATION_ABORTED");
+    }
+    @Test void concurrentDeleteRetriesCommitOneOperationAndOneOutboxEvent() throws Exception {
+        long id = create(); var pointer = persistence.describe(id);
+        long version = projects.findById(id).orElseThrow().getLockVersion();
+        var barrier = new CyclicBarrier(2);
+        when(gateway.fence(eq(id), anyString())).thenAnswer(call -> {
+            barrier.await(5, TimeUnit.SECONDS);
+            return new CollabGatewayClient.Fence(id, call.getArgument(1), pointer.epoch(), pointer.generation(), pointer.contentHash(), 0, "d".repeat(64));
+        });
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> a = pool.submit(() -> deletes.delete(teamId, id, owner.getId(), version));
+            Future<?> b = pool.submit(() -> deletes.delete(teamId, id, owner.getId(), version));
+            a.get(10, TimeUnit.SECONDS); b.get(10, TimeUnit.SECONDS);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM collab_operation WHERE project_id=?", Long.class, id)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM collab_control_event WHERE project_id=?", Long.class, id)).isEqualTo(1);
+            assertThat(projects.findById(id).orElseThrow().getStatus()).isZero();
+        } finally { pool.shutdownNow(); }
+    }
+    @Test void metadataRaceAfterFenceAbortsInsteadOfDeletingChangedProject() {
+        long id = create();
+        long version = projects.findById(id).orElseThrow().getLockVersion();
+        when(gateway.fence(eq(id), anyString())).thenAnswer(call -> {
+            jdbc.update("UPDATE project SET lock_version=lock_version+1 WHERE id=?", id);
+            var p = persistence.describe(id);
+            return new CollabGatewayClient.Fence(id, call.getArgument(1), p.epoch(), p.generation(), p.contentHash(), 0, "c".repeat(64));
+        });
+        assertThatThrownBy(() -> deletes.delete(teamId, id, owner.getId(), version)).isInstanceOf(com.webeditor.common.exception.ProjectStateConflictException.class);
+        assertThat(projects.findById(id).orElseThrow().getStatus()).isEqualTo((byte) 1);
+        assertThat(deletes.control(id).state()).isEqualTo("ACTIVE");
+    }
+    @Test void revocationOutboxSharesAuthorizationTransactionAndDeliveryRetries() {
+        long before = users.findById(owner.getId()).orElseThrow().getAuthzVersion();
+        CollabControlEvents target = org.springframework.test.util.AopTestUtils.getUltimateTargetObject(events);
+        doThrow(new IllegalStateException("outbox failure")).when(target).revoked(eq(owner.getId()), isNull(), anyLong());
+        assertThatThrownBy(() -> authService.logout(owner.getId())).isInstanceOf(IllegalStateException.class);
+        assertThat(users.findById(owner.getId()).orElseThrow().getAuthzVersion()).isEqualTo(before);
+        reset(target); authService.logout(owner.getId());
+        String eventId = jdbc.queryForObject("SELECT id FROM collab_control_event WHERE user_id=?", String.class, owner.getId());
+        doThrow(new CollabFailure(503, "unavailable")).when(gateway).control(any());
+        var dispatcher = new CollabControlDispatcher(jdbc, gateway, deletes, true); dispatcher.deliver();
+        assertThat(jdbc.queryForObject("SELECT attempts FROM collab_control_event WHERE id=?", Integer.class, eventId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT acknowledged_at FROM collab_control_event WHERE id=?", Timestamp.class, eventId)).isNull();
+        jdbc.update("UPDATE collab_control_event SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=?", eventId);
+        doNothing().when(gateway).control(any()); dispatcher.deliver();
+        assertThat(jdbc.queryForObject("SELECT acknowledged_at FROM collab_control_event WHERE id=?", Timestamp.class, eventId)).isNotNull();
+    }
+    @Test void operationQueriesRequireInternalHmacAndAreReachableWithoutBearer() throws Exception {
+        long id = create(); long version = projects.findById(id).orElseThrow().getLockVersion();
+        when(gateway.fence(eq(id), anyString())).thenThrow(new CollabFailure(503, "COLLAB_FENCE_FAILED"));
+        assertThatThrownBy(() -> deletes.delete(teamId, id, owner.getId(), version)).isInstanceOf(CollabFailure.class);
+        String path = "/internal/collaboration/operations/" + deletes.control(id).operationId();
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        String timestamp = Long.toString(Instant.now().getEpochSecond()), nonce = UUID.randomUUID().toString();
+        mvc.perform(get(path).header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", nonce)
+                .header("X-Collab-Signature", InternalHmac.sign(SECRET, "GET", path, "storage", timestamp, nonce, new byte[0])))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("PREPARED"));
     }
     @Test void internalTicketAndLeaseEndpointsRequireHmacAndNonceSurvivesNewAuthenticator() throws Exception {
         long id = create(); var ticket = tickets.issue(id, owner.getId());

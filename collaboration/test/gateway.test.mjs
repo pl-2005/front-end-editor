@@ -21,8 +21,8 @@ async function until(predicate, timeout = 3000) {
 async function setup(t) {
   const initial = createDocument({ projectId: 1, epoch: 1 }, '/index.html', [{ path: '/index.html', code: 'initial' }])
   let bytes = encodeDocument(initial, { projectId: 1, epoch: 1 }); initial.destroy()
-  let pointer = { projectId: 1, epoch: 1, generation: 1, size: bytes.length, contentHash: hash(bytes) }, consumes = 0, allow = true
-  const tickets = new Set(), receipts = new Map()
+  let pointer = { projectId: 1, epoch: 1, generation: 1, size: bytes.length, contentHash: hash(bytes) }, consumes = 0, allow = true, storageFail = false
+  const tickets = new Map(), receipts = new Map(), operations = new Map()
   const spring = createServer(async (request, response) => {
     const chunks = []; for await (const chunk of request) chunks.push(chunk)
     const body = Buffer.concat(chunks), path = request.url
@@ -31,15 +31,22 @@ async function setup(t) {
     const json = (value, code = 200) => response.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(value))
     if (path === '/internal/collaboration/tickets/consume') {
       consumes++; const input = JSON.parse(body)
+      const credential = tickets.get(input.ticket)
       if (!tickets.delete(input.ticket) || input.projectId !== 1 || input.epoch !== 1 || !allow) return json({ code: 'COLLAB_TICKET_INVALID' }, 401)
-      return json({ identity: { userId: 10, displayName: 'Verified', avatarColor: '#123456', projectId: 1, teamId: 2, epoch: 1, ticketId: randomUUID() },
-        authorization: { userId: 10, projectId: 1, epoch: 1, authzVersion: 1 } })
+      return json({ identity: { userId: credential.userId, displayName: 'Verified', avatarColor: '#123456', projectId: 1, teamId: 2, epoch: 1, ticketId: randomUUID() },
+        authorization: { userId: credential.userId, projectId: 1, epoch: 1, authzVersion: credential.version } })
     }
     if (path === '/internal/collaboration/connections/revalidate') return json(allow ? JSON.parse(body) : { code: 'COLLAB_FORBIDDEN' }, allow ? 200 : 403)
+    if (path.includes('/operations/')) return json(operations.get(path.split('/').at(-1)) ?? { code: 'COLLAB_OPERATION_NOT_FOUND' }, operations.has(path.split('/').at(-1)) ? 200 : 404)
+    if (path.endsWith('/control')) {
+      const op = [...operations.values()].find(op => op.state === 'PREPARED')
+      return json({ projectId: 1, epoch: pointer.epoch, state: op ? 'FENCED' : 'ACTIVE', operationId: op?.id ?? null })
+    }
     if (path.endsWith('/describe')) return json(pointer)
     if (path.endsWith('/load')) { response.writeHead(200).end(bytes); return }
     const match = /\/generations\/(\d+)\/persist\/(.+)$/.exec(path)
     if (match) {
+      if (storageFail) return json({ code: 'COLLAB_STORAGE_UNAVAILABLE' }, 503)
       if (receipts.has(match[2])) return json(receipts.get(match[2]))
       if (Number(match[1]) !== pointer.generation) return json({ code: 'COLLAB_GENERATION_CONFLICT' }, 409)
       bytes = new Uint8Array(body); pointer = { ...pointer, generation: pointer.generation + 1, size: bytes.length, contentHash: hash(bytes) }
@@ -60,8 +67,10 @@ async function setup(t) {
   })
   return { gateway, url, get consumes() { return consumes }, get bytes() { return bytes }, get pointer() { return pointer },
     revoke() { allow = false },
-    async connect(ticket = randomUUID()) {
-      tickets.add(ticket)
+    operations,
+    failStorage(value) { storageFail = value },
+    async connect(ticket = randomUUID(), userId = 10, version = 1) {
+      tickets.set(ticket, { userId, version })
       class OriginSocket extends WebSocket { constructor(url, protocols) { super(url, protocols, { origin }) } }
       const doc = new Y.Doc(), websocket = new HocuspocusProviderWebsocket({ url, WebSocketPolyfill: OriginSocket, autoConnect: false, maxAttempts: 1 })
       const provider = new HocuspocusProvider({ name: 'project:1:epoch:1', document: doc, websocketProvider: websocket, token: ticket })
@@ -75,6 +84,12 @@ async function setup(t) {
       return fetch(`http://127.0.0.1:${gateway.server.address.port}` + path, { method: 'POST', headers: headers ?? {
         'X-Collab-Timestamp': timestamp, 'X-Collab-Nonce': nonce,
         'X-Collab-Signature': signature(gatewaySecret, 'POST', path, 'gateway', timestamp, nonce, new Uint8Array()) } })
+    },
+    async control(path, value) {
+      const body = Buffer.from(JSON.stringify(value)), timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomUUID()
+      return fetch(`http://127.0.0.1:${gateway.server.address.port}` + path, { method: 'POST', body, headers: {
+        'Content-Type': 'application/json', 'X-Collab-Timestamp': timestamp, 'X-Collab-Nonce': nonce,
+        'X-Collab-Signature': signature(gatewaySecret, 'POST', path, 'gateway', timestamp, nonce, body) } })
     },
   }
 }
@@ -132,4 +147,68 @@ test('authorization renewal failure closes connection within the five-second lea
   client.doc.getMap('files').values().next().value.get('content').insert(0, 'forbidden')
   await new Promise(resolve => setTimeout(resolve, 50))
   assert.equal(room.dirtySequence, accepted)
+})
+
+test('delete fence flushes accepted updates, blocks further input and retries with the same token', async t => {
+  const f = await setup(t), client = await f.connect(), operationId = randomUUID()
+  const room = f.gateway.rooms.get('project:1:epoch:1')
+  client.doc.getMap('files').values().next().value.get('content').insert(0, 'before-delete')
+  await until(() => room.dirtySequence === 1)
+  f.operations.set(operationId, { id: operationId, projectId: 1, expectedEpoch: 1, state: 'PREPARED' })
+  const path = '/internal/collaboration/projects/1/fence'
+  const first = await f.control(path, { operationId }); assert.equal(first.status, 200)
+  const ack = await first.json(); assert.equal(ack.generation, 2); assert.equal(ack.durableSequence, 1)
+  assert.equal(room.fenced, true); assert.equal(room.pending.length, 0)
+  assert.throws(() => room.accept(new Uint8Array([0, 0])), /COLLAB_ROOM_READ_ONLY/)
+  const retry = await f.control(path, { operationId }); assert.equal((await retry.json()).fenceToken, ack.fenceToken)
+  f.operations.get(operationId).state = 'COMMITTED'
+  const event = { id: randomUUID(), aggregateId: 'project:1', aggregateSequence: 1, eventType: 'PROJECT_DELETED',
+    projectId: 1, epoch: 2, operationId }
+  assert.equal((await f.control('/internal/collaboration/control', event)).status, 200)
+  await until(() => room.doc.getConnectionsCount() === 0)
+  assert.equal(room.frozen, true)
+  assert.equal((await f.control('/internal/collaboration/control', event)).status, 200)
+})
+
+test('empty-room fence verifies the current pointer; only a database-confirmed abort releases it', async t => {
+  const f = await setup(t), operationId = randomUUID()
+  f.operations.set(operationId, { id: operationId, projectId: 1, expectedEpoch: 1, state: 'PREPARED' })
+  const result = await f.control('/internal/collaboration/projects/1/fence', { operationId })
+  assert.equal(result.status, 200); assert.equal((await result.json()).generation, 1)
+  const event = { id: randomUUID(), aggregateId: 'project:1', aggregateSequence: 1, eventType: 'OPERATION_ABORTED', projectId: 1, epoch: 1, operationId }
+  assert.equal((await f.control('/internal/collaboration/control', event)).status, 503)
+  f.operations.get(operationId).state = 'ABORTED'
+  assert.equal((await f.control('/internal/collaboration/control', event)).status, 200)
+  const client = await f.connect(); assert.equal(client.provider.isSynced, true)
+})
+
+test('failed durable-close retains pending work and its fence until storage recovers', async t => {
+  const f = await setup(t), client = await f.connect(), operationId = randomUUID()
+  const room = f.gateway.rooms.get('project:1:epoch:1')
+  client.doc.getMap('files').values().next().value.get('content').insert(0, 'must-survive')
+  await until(() => room.dirtySequence > 0)
+  f.operations.set(operationId, { id: operationId, projectId: 1, expectedEpoch: 1, state: 'PREPARED' })
+  f.failStorage(true)
+  assert.equal((await f.control('/internal/collaboration/projects/1/fence', { operationId })).status, 503)
+  assert.equal(room.fenced, true); assert.equal(room.pending.length, 1); assert.equal(room.durableSequence, 0)
+  assert.throws(() => room.accept(new Uint8Array([0, 0])), /COLLAB_ROOM_READ_ONLY/)
+  f.failStorage(false)
+  assert.equal((await f.control('/internal/collaboration/projects/1/fence', { operationId })).status, 200)
+  assert.equal(room.pending.length, 0); assert.equal(room.durableSequence, room.dirtySequence)
+})
+
+test('outbox revokes only stale target-user connections; duplicate and reordered events preserve current sessions', async t => {
+  const f = await setup(t), a = await f.connect(), b = await f.connect(randomUUID(), 11)
+  const room = f.gateway.rooms.get('project:1:epoch:1')
+  const event = { id: randomUUID(), aggregateId: 'user:10', aggregateSequence: 2, eventType: 'USER_REVOKED', userId: 10, authzVersion: 2 }
+  assert.equal((await f.control('/internal/collaboration/control', event)).status, 200)
+  await until(() => room.doc.getConnectionsCount() === 1)
+  assert.equal(b.provider.isSynced, true)
+  const current = await f.connect(randomUUID(), 10, 3)
+  assert.equal((await f.control('/internal/collaboration/control', event)).status, 200)
+  assert.equal((await f.control('/internal/collaboration/control', { ...event, id: randomUUID(), aggregateSequence: 1, authzVersion: 1 })).status, 200)
+  assert.equal(room.doc.getConnectionsCount(), 2)
+  assert.equal(current.provider.isSynced, true); assert.equal(a.provider.isSynced, false)
+  b.doc.getMap('files').values().next().value.get('content').insert(0, 'still-valid')
+  await until(() => room.dirtySequence > 0)
 })

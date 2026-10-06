@@ -31,7 +31,8 @@ public class SecurityErrors {
         response.setCharacterEncoding("UTF-8");
         response.setHeader("Cache-Control", "no-store");
         mapper.writeValue(response.getOutputStream(), ApiError.of(status, code,
-                status == 401 ? "需要登录" : status == 403 ? "访问被拒绝" : status == 400 ? "请求参数校验失败"
+                "INVALID_CREDENTIALS".equals(code) ? "用户名或密码错误"
+                        : status == 401 ? "需要登录" : status == 403 ? "访问被拒绝" : status == 400 ? "请求参数校验失败"
                         : status == 429 ? "请求过于频繁" : "认证服务暂时不可用", request.getRequestURI()));
     }
 }

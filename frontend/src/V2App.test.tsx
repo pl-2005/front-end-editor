@@ -33,7 +33,7 @@ describe('V2 routes', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '项目名称' }), { target: { value: 'New project' } })
     fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
     await screen.findByRole('heading', { name: 'New project' })
-    expect(screen.getByRole('button', { name: '删除' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '删除' }).hasAttribute('disabled')).toBe(false)
     expect(fetcher.mock.calls.every(([path]) => !path.includes('snapshot') && !path.includes('revision'))).toBe(true)
   })
 

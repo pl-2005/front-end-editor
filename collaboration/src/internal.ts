@@ -12,6 +12,7 @@ export class InternalFailure extends Error {
 export type Pointer = { projectId: number; epoch: number; generation: number; contentHash: string; size: number }
 export type Identity = { userId: number; displayName: string; avatarColor: string; projectId: number; teamId: number; epoch: number; ticketId: string }
 export type Authorization = { userId: number; projectId: number; epoch: number; authzVersion: number }
+export type Operation = { id: string; projectId: number; expectedEpoch: number; state: 'PREPARED' | 'COMMITTED' | 'ABORTED' }
 export interface StorageApi {
   describe(id: number): Promise<Pointer>
   load(pointer: Pointer): Promise<Uint8Array>
@@ -73,6 +74,12 @@ export class SpringApi implements StorageApi {
   }
   revalidate(input: Authorization): Promise<Authorization> {
     return this.request('/internal/collaboration/connections/revalidate', 'POST', Buffer.from(JSON.stringify(input)))
+  }
+  operation(id: string): Promise<Operation> {
+    return this.request(`/internal/collaboration/operations/${id}`)
+  }
+  control(id: number): Promise<{ projectId: number; epoch: number; state: 'ACTIVE' | 'FENCED' | 'DELETED'; operationId: string | null }> {
+    return this.request(`/internal/collaboration/projects/${id}/control`)
   }
   async describe(id: number): Promise<Pointer> {
     const p = await this.request(`/internal/collaboration/projects/${id}/describe`)

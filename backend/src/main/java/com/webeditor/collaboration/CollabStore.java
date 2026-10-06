@@ -31,6 +31,12 @@ public class CollabStore {
      *
      * @param p 协作文档指针
      */
+    public CollabPointer lock(long id) {
+        return jdbc.query("SELECT * FROM collab_document WHERE project_id=? FOR UPDATE", (rs, row) ->
+                new CollabPointer(id, rs.getLong("epoch"), rs.getLong("generation"), rs.getString("object_key"),
+                        rs.getString("content_hash"), rs.getLong("size"), rs.getString("content_type")), id)
+                .stream().findFirst().orElseThrow(CollabFailure::corrupt);
+    }
     public void insert(CollabPointer p) {
         jdbc.update("INSERT INTO collab_document(project_id, collaboration_mode, epoch, generation, object_key, content_hash, size, content_type, lock_version, created_at, updated_at) VALUES (?, 'YJS', ?, ?, ?, ?, ?, ?, 0, ?, ?)",
                 p.projectId(), p.epoch(), p.generation(), p.objectKey(), p.contentHash(), p.size(), p.contentType(), ts(Instant.now()), ts(Instant.now()));

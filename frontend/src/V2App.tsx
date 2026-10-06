@@ -335,7 +335,11 @@ function ProjectPage() {
         try { const copy = await teams.copyTeamProject(teamId, project.id, name); navigate(`/teams/${teamId}/projects/${copy.id}`) }
         catch (error) { if (error instanceof ApiError && error.initializingProjectId) setInitializingId(error.initializingProjectId); throw error }
       })
-    }}>复制项目</button><button type="button" disabled title="项目删除暂未开放">删除</button>
+    }}>复制项目</button><button type="button" disabled={task.busy} onClick={() => {
+      if (window.confirm(`确定删除项目“${project.name}”？删除后无法恢复。`)) void runProject(async () => {
+        await teams.deleteTeamProject(teamId, project); setProject(null); navigate(`/teams/${teamId}`, { replace: true })
+      })
+    }}>删除</button>
       {initializingId ? <button type="button" disabled={task.busy} onClick={() => void runProject(async () => {
         const copy = await teams.retryTeamProjectInitialization(teamId, initializingId); navigate(`/teams/${teamId}/projects/${copy.id}`)
       })}>重试项目初始化</button> : null}

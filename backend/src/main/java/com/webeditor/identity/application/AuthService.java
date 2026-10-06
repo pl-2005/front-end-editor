@@ -23,6 +23,7 @@ public class AuthService {
     private final PasswordEncoder passwords;
     private final TokenService tokens;
     private final RefreshStore refresh;
+    private final com.webeditor.collaboration.CollabControlEvents events;
     /**
      * 初始化组件依赖及配置，供后续业务方法使用。
      *
@@ -31,8 +32,9 @@ public class AuthService {
      * @param tokens 访问令牌签发服务
      * @param refresh 刷新令牌存储服务
      */
-    public AuthService(AppUserRepository users, PasswordEncoder passwords, TokenService tokens, RefreshStore refresh) {
-        this.users = users; this.passwords = passwords; this.tokens = tokens; this.refresh = refresh;
+    public AuthService(AppUserRepository users, PasswordEncoder passwords, TokenService tokens, RefreshStore refresh,
+            com.webeditor.collaboration.CollabControlEvents events) {
+        this.users = users; this.passwords = passwords; this.tokens = tokens; this.refresh = refresh; this.events = events;
     }
     /**
      * 规范化并校验注册信息，检查账号唯一性，编码密码后保存用户；并发唯一约束冲突转换为业务错误。
@@ -115,7 +117,10 @@ public class AuthService {
      *
      * @param id 用户 ID
      */
-    @Transactional public void logout(long id) { users.lockById(id).orElseThrow(AuthService::unauthenticated).revoke(); }
+    @Transactional public void logout(long id) {
+        AppUser user = users.lockById(id).orElseThrow(AuthService::unauthenticated);
+        user.revoke(); events.revoked(id, null, user.getAuthzVersion());
+    }
     /**
      * 校验新密码和原密码，在用户锁内更新密码摘要并撤销已有会话。
      *
@@ -128,6 +133,7 @@ public class AuthService {
         AppUser user = users.lockById(id).orElseThrow(AuthService::unauthenticated);
         if (current == null || !passwords.matches(current, user.getPasswordHash())) throw unauthenticated();
         user.changePassword(passwords.encode(replacement));
+        events.revoked(id, null, user.getAuthzVersion());
     }
     /**
      * 创建统一的 401 认证失败异常，避免泄露账号存在性。

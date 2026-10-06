@@ -1,6 +1,22 @@
 # 步骤 09：持久化协调、软删除关房与成员撤权
 
-> 前置：步骤 05–08。状态：未开始。目标：删除和撤权不能绕过当前 Y.Doc 持久化或旧连接隔离。
+> 前置：步骤 05–08。状态：已实现并完成自动检查及本机功能验收（2026-10-06）。目标：删除和撤权不能绕过当前 Y.Doc 持久化或旧连接隔离。
+
+## 实现记录
+
+追加 V12，新增 `collab_operation` 与 `collab_control_event`。Spring 删除服务先在项目锁内建立幂等 PREPARED，再于数据库事务外请求网关 fence/durable-close；提交事务按 `project → collab_document` 顺序锁行，复核元数据 If-Match、epoch、generation、hash，原子软删除、推进 epoch、提交 operation 并追加 PROJECT_DELETED。并发重复删除只提交一次，元数据变化或数据库回滚则写 ABORTED 与对应事件；ACK 丢失或数据库结果未知时保留 fence。事务内 operation/文档使用 FOR UPDATE 当前读，避免 MySQL 默认可重复读的旧快照干扰对账。
+
+网关对项目设置独立 fence，禁止新 Update、握手及异步加载落地，同时允许已接受 pending 继续 flush。无活动房间仍核对当前数据库指针和残留队列；确定 durable 后返回 generation/hash/sequence 及 256-bit fence token。SQLite 持久化 fence/token/回执与事件水位，与现有 nonce 使用相同持久磁盘文件，不保存源码；重启握手及加载再次查询 Spring 控制状态，PREPARED 不会因房间卸载或租约到期而自动解除。
+
+退出所有设备、修改密码、退出团队及 OWNER 移除成员，在原授权事务中更新水位并写 USER_REVOKED。Outbox 每秒投递，失败指数退避、重试并记录脱敏告警；网关先关闭目标用户的旧水位连接，再持久化聚合水位和返回 ACK。当前 authzVersion 为用户级水位，撤权影响该用户的旧连接，其他有效成员房间持续运行，新水位连接不受迟到旧事件影响。最长 5 秒授权租约及握手实时内省继续兜底。
+
+长期 PREPARED 的 60 秒租约到期后，对账器先请求网关确认 durable fence，再锁数据库核对项目状态、原 epoch 和 operation 提交痕迹，安全 ABORT；COMMITTED 的 finalize 由事务 Outbox 持续重试。网关或 Spring 不可达时保持关闭写入。删除保留最后对象键和原始 epoch（对象键及 operation.expected_epoch），已删除项目拒绝 describe/load/persist，清理器仍将保留指针视为引用；没有硬删除或恢复已删除项目。
+
+前端开放有效成员的项目删除按钮，使用元数据 ETag，提交后清理发起者对应缓存并返回团队。Hocuspocus 4.7 文档 CLOSE 帧在 Provider 中使用 code=1000，因此前端同时检查服务端删除/撤权 reason 和传输层 4403，立即停止编辑、清空内容及缓存；临时 fence 原因或 4410 暂停编辑并保留日志。离房、复制和停机仍只更新当前文件，不创建 revision/checkpoint。
+
+验证：后端 50 项测试及打包、协作模块 21 项测试及 TypeScript 构建、前端 79 项测试/lint/TypeScript/生产构建通过。新增覆盖并发/重复删除、删除前最新保存、If-Match 并发变化、数据库回滚、ACK 失败保留 PREPARED、到期对账、授权与 Outbox 同事务回滚、投递重试、重复/乱序事件、单用户主动撤权、fence 存储失败保留 pending、无房间确认、持久控制状态重开，以及临时 fence 保留缓存和文档撤权清理。
+
+本机运行使用根 `.env` 的 MySQL/MinIO/Redis，无 Docker。V12 已执行；真实 Provider 验收通过 MEMBER 编辑期间软删除、durable flush、MinIO 最后对象 hash/size/内容保留、无活动房间删除、重复请求、旧票据/旧 epoch 拒绝、四类 Outbox 主动撤权、其他成员继续保存及网关重启恢复。脚本与内部协议见 [协作模块说明](../../../collaboration/README.md#step09-删除outbox-与故障对账)。临时 Spring、网关及初始化服务均已停止，验收账号与项目保留本机。生产票据、网关及外部协作入口仍保持关闭；下一步为 Step10，公开发布留给 Step11。
 
 ## 控制数据
 

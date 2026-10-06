@@ -15,6 +15,7 @@ export class Room {
   durableSequence = 0
   paused = false
   frozen = false
+  fenced = false
   pending: Pending[] = []
   pendingBytes = 0
   persistPromise?: Promise<void>
@@ -38,7 +39,7 @@ export class Room {
   get memoryBytes(): number { return Y.encodeStateAsUpdate(this.doc).byteLength + this.pendingBytes + (this.attempt?.bytes.byteLength ?? 0) }
   /** Called synchronously after lease verification. No await between scratch validation and actual application. */
   accept(update: Uint8Array): void {
-    if (this.paused || this.frozen || this.disposed) throw new InternalFailure('COLLAB_ROOM_READ_ONLY', 403)
+    if (this.paused || this.frozen || this.fenced || this.disposed) throw new InternalFailure('COLLAB_ROOM_READ_ONLY', 403)
     if (update.byteLength > LIMITS.updateBytes) throw new InternalFailure('COLLAB_UPDATE_TOO_LARGE', 413)
     if (this.pending.length >= this.options.maxPendingUpdates || this.pendingBytes + update.byteLength > this.options.maxPendingBytes)
       throw new InternalFailure('COLLAB_PENDING_LIMIT', 429)
@@ -70,8 +71,10 @@ export class Room {
       acceptedHash: this.acceptedHash,
       durableHash: this.durableHash,
       dirtySequence: this.dirtySequence, durableSequence: this.durableSequence,
-      status: this.frozen ? 'forbidden' : this.paused ? 'failed' : this.durableSequence >= this.dirtySequence ? 'durable' : 'pending' }
+      status: this.frozen ? 'forbidden' : this.paused || this.fenced ? 'failed' : this.durableSequence >= this.dirtySequence ? 'durable' : 'pending' }
   }
+  setFence(value: boolean): void { this.fenced = value; this.publishState() }
+  deleted(): void { this.frozen = true; this.publishState(); this.closeConnections() }
   private publishState(): void { this.publish(this.state()) }
   private schedule(): void {
     if (this.debounce) clearTimeout(this.debounce)
@@ -84,6 +87,8 @@ export class Room {
   }
   private backgroundFlush(): void { void this.flush().catch(() => {}) }
   async flush(target = this.dirtySequence): Promise<Pointer> {
+    // Deleted rooms were already durably fenced. Framework unload/stop hooks may run afterwards.
+    if (this.frozen && this.canUnload() && this.durableSequence >= target) return this.pointer
     if (this.frozen || this.disposed) throw new InternalFailure('COLLAB_EPOCH_CONFLICT', 409)
     while (this.durableSequence < target) {
       if (!this.persistPromise) {

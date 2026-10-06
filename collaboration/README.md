@@ -144,7 +144,7 @@ node scripts/verify-step07-local.mjs
 
 脚本读取根 `.env`，在独立 Vite/Java/网关进程中使用 loopback 15173/18086/18092/18093，避免 Vite 编译干扰网关五秒租约。验证真实补全接受、HTML/CSS/JS 诊断、跨文件导入、结构操作、undo/redo、容量保护、大文件降级、Sandpack 控制台、自动持久化、网关重启、新票据、工作区重开和服务端撤权后的模型清理。结束后关闭临时服务和验收页，保留验收账号、项目与 `.codex-build/step07-workspace.png`；身份及内部凭据仅在内存中，不修改根 `.env`。可用 CDP_PROXY_URL 覆盖本机 proxy 地址。
 
-上述记录对应 Step07 验收；Step08 已补齐离线日志、持续编辑与 Presence，见下节。项目删除与 Outbox 主动撤权仍由 Step09 完成。生产开关保持关闭，Step11 才发布完整 V2。
+上述记录对应 Step07 验收；Step08 已补齐离线日志、持续编辑与 Presence，见下节。项目删除与 Outbox 主动撤权的协议和验收见 Step09 一节。生产开关保持关闭，Step11 才发布完整 V2。
 
 ## Step08 本机浏览器验收
 
@@ -173,3 +173,34 @@ node scripts/verify-step08-local.mjs
 浏览器脚本需要已连接的 web-access CDP proxy（默认 localhost:3456），读取根 `.env` 连接本机 MySQL/MinIO/Redis，在 loopback 15173/18086/18092/18093 启动临时服务。只操作新建验收标签页，通过切断协作传输并模拟票据请求网络错误验证离线编辑；应用静态资源与 Sandpack 运行依赖保持可用。覆盖文本与结构编辑、跨扩展名重命名、本地预览日志、新票据合并、两标签页成员/远端选区、删除冲突恢复、页面重载与重新登录后的重发、网关重启和撤权清理。退出团队缓存范围、旧 epoch、容量及存储错误由自动测试覆盖。
 
 脚本不修改根 `.env`，不打印或写入身份凭据；结束后关闭临时服务和自身标签页，保留验收账号、项目及 `.codex-build/step08-workspace.png`。`LOCAL_VITE_CACHE_DIR` 仅用于服务端配置，可将开发缓存定向到工作区可写目录，不进入浏览器环境变量。V2 生产开关保持关闭。
+
+## Step09 删除、Outbox 与故障对账
+
+V12 新增 `collab_operation` 和 `collab_control_event`。项目删除携带元数据强 If-Match；所有有效成员同权。Spring 先提交 PREPARED，随后通过内部 fence 请求停止网关新 Update 并 flush，收到 durable-close ACK 后按 `project → collab_document` 锁顺序再次核对元数据版本、epoch、generation 和 hash，同一事务软删除、递增 epoch、提交 operation 及 PROJECT_DELETED 事件。最后对象键保持不变，其原始 epoch 同时保留在对象键和 operation.expected_epoch 中；已删除项目禁止 describe/load/persist，本期不硬删。
+
+| 接收端 | 方法与路径 | 正文/结果 |
+| --- | --- | --- |
+| Spring | `GET /internal/collaboration/projects/{id}/control` | 项目 epoch、ACTIVE/FENCED/DELETED、当前 operation ID |
+| Spring | `GET /internal/collaboration/operations/{id}` | operation 状态、预期水位及提交后的 fence 回执 |
+| 网关 | `POST /internal/collaboration/projects/{id}/fence` | operationId → projectId/operationId/epoch/generation/contentHash/durableSequence/fenceToken |
+| 网关 | `POST /internal/collaboration/control` | Outbox 事件 → id/aggregateSequence ACK |
+
+继续使用 storage/gateway audience、独立 HMAC 密钥和持久化 nonce；这些路由不向浏览器或公网开放。网关的 SQLite nonce 文件同时保存 fence/token/durable 回执和事件聚合水位，不保存源码。该文件必须位于持久磁盘。房间卸载不会清除 fence；握手和房间加载复核 Spring 控制状态，重启不能绕过 PREPARED。
+
+fence 不阻止已有 pending 的持久化。flush、网络或 ACK 失败返回 503，项目状态保持不变，队列和 fence 保留。数据库回滚后用新事务确认 PREPARED、项目 ACTIVE 及原 epoch，写 ABORTED 和 OPERATION_ABORTED 事件；提交结果未知时不直接解除 fence。PREPARED 租约为 60 秒，对账器每 10 秒检查到期操作，先查询并确认网关 durable fence，再根据数据库提交痕迹安全 ABORT；COMMITTED 的 finalize 由可靠 Outbox 重试完成。租约过期本身不会恢复写入，Spring/网关不可达时继续 fail closed。
+
+退出所有设备、改密、退出团队及 OWNER 移除成员，在原授权事务更新水位并追加 USER_REVOKED。当前 authzVersion 是用户级水位，事件关闭该用户所有旧水位连接，不冻结其他成员的房间；新水位连接不受迟到旧事件影响。Outbox 启动 1 秒后按 1 秒轮询，失败指数退避至最多 60 秒并输出仅含事件 ID/次数的告警；至少一次投递，网关持久化聚合水位处理重复/乱序，ACK 后 Spring 标记确认。事件延迟时保留最长 5 秒授权租约兜底。
+
+永久删除/撤权通过 forbidden 状态或关闭原因触发前端内容及对应缓存清理。Hocuspocus 4.7 的文档 CLOSE 帧在 Provider 中使用 code=1000，因此同时检查 `COLLAB_USER_REVOKED`、`COLLAB_PROJECT_DELETED`、`COLLAB_AUTHORIZATION_EXPIRED`，也接受传输层 4403。临时 PREPARED 用 `COLLAB_PROJECT_FENCED` 或传输层 4410，暂停编辑并保留日志，重新取得票据后可恢复；删除 API 成功也会清理发起者项目缓存。普通离房、停机和复制仍只 flush 当前状态，不创建 revision/checkpoint。
+
+```powershell
+# 从仓库根目录执行。
+$step09BuildPath = Join-Path (Get-Location).Path '.codex-build/step09-backend'
+cd backend
+mvn -o package "-Deditor.build.directory=$step09BuildPath"
+cd ../collaboration
+npm test
+node scripts/verify-step09-local.mjs
+```
+
+脚本使用根 `.env` 的本机 MySQL/MinIO/Redis，在 loopback 18089/18094/18095 启动临时 Spring、网关及初始化服务。验证编辑中 durable 删除、无活动房间删除、重复删除、旧票据拒绝、MinIO 最后对象保留、四类 Outbox 主动撤权、其他成员继续编辑及网关重启恢复。MinIO 签名读取仅由验收脚本使用本机配置，网关没有 MinIO 凭据。结束后关闭临时进程，验收账号及项目保留；不使用 Docker，不修改根 `.env`，不打印或落盘身份/内部凭据。生产协作入口仍等待 Step11。
