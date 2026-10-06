@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import {
-  SandpackCodeEditor, SandpackConsole, SandpackLayout, SandpackPreview, SandpackProvider, useSandpack,
+  SandpackCodeEditor, SandpackLayout, SandpackPreview, SandpackProvider, useSandpack,
   type SandpackFiles,
 } from '@codesandbox/sandpack-react'
 import { useProjectSave } from '../hooks/useProjectSave'
 import type { ProjectDetails, ProjectFiles } from '../types/project'
 import { ProjectFileTree } from './ProjectFileTree'
 import { RevisionHistory } from './RevisionHistory'
+import { newFileContent } from './newFileContent'
+import { PreviewConsole } from './PreviewConsole'
 import { prepareSandpackFiles, restoreUnchangedRuntimeFiles } from './sandpackRuntime'
 
 interface Props {
@@ -50,13 +52,13 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
   const { status, message, save } = useProjectSave({ projectId: project.id, initialVersion: project.version, entry: project.entry, files, onVersionChange, initiallyDirty: recoveredDraft })
 
   /**
-   * 创建空文件并在编辑器中打开，将其加入待保存文件集合。
+   * 按文件类型创建初始内容并在编辑器中打开，将其加入待保存文件集合。
    *
    * @param path 目标路径
    */
   const createFile = useCallback((path: string) => {
     if (sandpack.files[path]) { window.alert('该文件已存在'); return }
-    sandpack.addFile(path, '')
+    sandpack.addFile(path, newFileContent(path))
     sandpack.openFile(path)
   }, [sandpack])
 
@@ -171,7 +173,7 @@ function WorkspaceContents({ project, files: sourceFiles, recoveryMessage, recov
           {isConsoleOpen ? '×' : '⌃'}
         </button>
       </div>
-      {isConsoleOpen ? <SandpackConsole resetOnPreviewRestart /> : null}
+      {isConsoleOpen ? <PreviewConsole /> : null}
     </div>
   </section>
 }

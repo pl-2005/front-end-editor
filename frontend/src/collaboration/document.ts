@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { newFileContent } from '../editor/newFileContent'
 import { documentFingerprint, LIMITS, normalizePath, resolvedPaths, validatePath } from '../../../collaboration/src/document-rules'
 export { LIMITS, normalizePath }
 export const STRUCTURE_ORIGIN = Symbol('local-file-command')
@@ -50,7 +51,7 @@ export function fileCommands(doc: Y.Doc, identity: Identity, writable: () => boo
       const id = crypto.randomUUID()
       doc.transact(() => {
         const file = new Y.Map<unknown>()
-        file.set('id', id); file.set('path', path); file.set('language', validatePath(path)); file.set('deletedAt', null); file.set('content', new Y.Text())
+        file.set('id', id); file.set('path', path); file.set('language', validatePath(path)); file.set('deletedAt', null); file.set('content', new Y.Text(newFileContent(path)))
         doc.getMap('files').set(id, file); doc.getArray<string>('fileOrder').push([id])
       }, STRUCTURE_ORIGIN)
       return id

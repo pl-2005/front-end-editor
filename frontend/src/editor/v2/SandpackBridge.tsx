@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { SandpackConsole, SandpackPreview, SandpackProvider, useSandpack } from '@codesandbox/sandpack-react'
+import { SandpackPreview, SandpackProvider, useSandpack } from '@codesandbox/sandpack-react'
+import { PreviewConsole } from '../PreviewConsole'
 import type { CollaborationSession } from '../../collaboration/session'
 import type { ProjectFiles } from '../../types/project'
 import { previewProjection } from './projection'
@@ -42,7 +43,7 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
     session.doc.on('update', schedule); flush()
     return () => { stopped = true; clearTimeout(debounce); clearTimeout(deadline); clearTimeout(readyTask); clearTimeout(refresh); unsubscribe(); session.doc.off('update', schedule) }
   }, [session, entry])
-  return <div className="v2-preview-pane">{error ? <p role="alert">{error}</p> : null}<SandpackPreview startRoute={entry === '/index.html' ? '/' : entry} showOpenInCodeSandbox={false} showRefreshButton /><details className="v2-console" open><summary>控制台</summary><SandpackConsole resetOnPreviewRestart /></details></div>
+  return <div className="v2-preview-pane">{error ? <p role="alert">{error}</p> : null}<SandpackPreview startRoute={entry === '/index.html' ? '/' : entry} showOpenInCodeSandbox={false} showRefreshButton /><details className="v2-console" open><summary>控制台</summary><PreviewConsole /></details></div>
 }
 export function SandpackBridge({ session, entry, structureKey }: { session: CollaborationSession; entry: string; structureKey: string }) {
   const initial = useMemo(() => ({ ...previewProjection(session), entry, structureKey }), [session, entry, structureKey])

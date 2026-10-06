@@ -6,27 +6,69 @@ export const DEFAULT_FILES: ProjectFiles = {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Web Editor</title>
+  <title>简单计数器</title>
 </head>
 <body>
   <main class="card">
-    <p class="eyebrow">SANDBOX READY</p>
-    <h1>开始创作你的页面</h1>
-    <p>修改左侧文件，预览会即时更新。</p>
-    <button id="action">试一试</button>
+    <h1>简单计数器</h1>
+    <p>点击按钮，改变计数。</p>
+    <p id="count" class="count" role="status" aria-live="polite">0</p>
+    <div class="actions">
+      <button id="decrement" type="button" aria-label="减一">−1</button>
+      <button id="reset" type="button">重置</button>
+      <button id="increment" type="button" aria-label="加一">+1</button>
+    </div>
   </main>
   <script type="module" src="/index.js"></script>
 </body>
 </html>` },
-  '/styles.css': { code: `* { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; color: #eef2e9; background: #121510; }
-.card { width: min(560px, 90vw); padding: 48px; border: 1px solid #3a4135; border-radius: 24px; }
-.eyebrow { color: #b6f36b; font: 700 12px monospace; letter-spacing: .16em; }
-h1 { font-size: clamp(36px, 8vw, 64px); line-height: 1; }
-button { padding: 10px 18px; border: 0; border-radius: 999px; background: #b6f36b; cursor: pointer; }` },
+  '/styles.css': { code: `* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; color: #eef2e9; background: #121510;
+}
+.card {
+  width: min(400px, 90vw); padding: 32px; border: 1px solid #3a4135; border-radius: 24px; text-align: center;
+}
+h1 {
+  margin: 0; font-size: 28px;
+}
+.count {
+  margin: 24px 0; color: #b6f36b; font-size: 72px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.actions {
+  display: flex; justify-content: center; gap: 12px;
+}
+button {
+  padding: 10px 18px; border: 0; border-radius: 999px; color: #121510; background: #b6f36b; font: inherit; cursor: pointer;
+}
+button:hover {
+  background: #c9ff8c;
+}
+button:focus-visible {
+  outline: 2px solid #eef2e9; outline-offset: 4px;
+}` },
   '/index.js': { code: `import "./styles.css";
 
-document.querySelector("#action")?.addEventListener("click", () => {
-  console.log("你好，Sandpack！");
+let count = 0;
+const display = document.querySelector("#count");
+
+function updateCount(value) {
+  count = value;
+  display.textContent = String(count);
+  console.log(count);
+}
+
+document.querySelector("#decrement")?.addEventListener("click", () => {
+  updateCount(count - 1);
+});
+
+document.querySelector("#reset")?.addEventListener("click", () => {
+  updateCount(0);
+});
+
+document.querySelector("#increment")?.addEventListener("click", () => {
+  updateCount(count + 1);
 });` },
 }
