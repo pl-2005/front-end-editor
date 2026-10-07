@@ -1,4 +1,5 @@
 import { accessToken, clearAuth, getAccessToken, getAuthSession, refreshCredentials } from './auth'
+import { getResponseMessage } from './responseMessage'
 
 export class ApiError extends Error {
   /**
@@ -9,9 +10,18 @@ export class ApiError extends Error {
    * @param code 业务错误码
    * @param retryAfter 允许重试前的等待秒数
    * @param initializingProjectId 初始化失败时已预留的项目 ID
+   * @param responseMessage API 实际返回的非空消息，用于优先展示并区分本地兜底
    */
-  constructor(message: string, readonly status: number, readonly code?: string, readonly retryAfter?: number,
-    readonly initializingProjectId?: number) { super(message) }
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly retryAfter?: number,
+    readonly initializingProjectId?: number,
+    readonly responseMessage?: string,
+  ) {
+    super(message)
+  }
 }
 
 /**
@@ -41,20 +51,34 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (session !== getAuthSession()) throw new Error('登录状态已变化')
   if (response.status === 401 && token && getAccessToken()) {
     try {
-      token = getAccessToken() === token ? (await refreshCredentials()).accessToken : getAccessToken()
+      token =
+        getAccessToken() === token ? (await refreshCredentials()).accessToken : getAccessToken()
       response = await send(token)
       if (session !== getAuthSession()) throw new Error('登录状态已变化')
-    } catch { if (getAccessToken() === token) clearAuth() }
+    } catch {
+      if (getAccessToken() === token) clearAuth()
+    }
   }
   if (!response.ok) {
     if (response.status === 401 && token && getAccessToken() === token) clearAuth()
-    const body = await response.json().catch(() => ({})) as { message?: string; code?: string }
+    const payload: unknown = await response.json().catch(() => ({}))
+    const body = (payload && typeof payload === 'object' ? payload : {}) as { code?: string }
+    const responseMessage = getResponseMessage(payload)
     const retry = Number(response.headers.get('Retry-After'))
     const initializingId = Number(response.headers.get('X-Initializing-Project'))
-    throw new ApiError(body.message ?? `请求失败（${response.status}）`, response.status, body.code,
+    throw new ApiError(
+      responseMessage ?? `请求失败（${response.status}）`,
+      response.status,
+      body.code,
       response.status === 429 && Number.isInteger(retry) ? retry : undefined,
-      body.code === 'COLLAB_INITIALIZATION_FAILED' && Number.isSafeInteger(initializingId) && initializingId > 0 ? initializingId : undefined)
+      body.code === 'COLLAB_INITIALIZATION_FAILED' &&
+        Number.isSafeInteger(initializingId) &&
+        initializingId > 0
+        ? initializingId
+        : undefined,
+      responseMessage,
+    )
   }
   if (response.status === 204) return undefined as T
-  return (await response.json() as { data: T }).data
+  return ((await response.json()) as { data: T }).data
 }

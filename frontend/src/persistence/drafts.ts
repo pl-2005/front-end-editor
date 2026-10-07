@@ -19,7 +19,8 @@ function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, 1)
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: 'projectId' })
+      if (!request.result.objectStoreNames.contains(STORE_NAME))
+        request.result.createObjectStore(STORE_NAME, { keyPath: 'projectId' })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -33,7 +34,10 @@ function openDatabase(): Promise<IDBDatabase> {
  * @param action 接收对象仓库并创建 IndexedDB 请求的回调
  * @returns 对象请求的结果；请求失败时 Promise 拒绝
  */
-async function runTransaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function runTransaction<T>(
+  mode: IDBTransactionMode,
+  action: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
   const database = await openDatabase()
   try {
     return await new Promise<T>((resolve, reject) => {
@@ -41,7 +45,9 @@ async function runTransaction<T>(mode: IDBTransactionMode, action: (store: IDBOb
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => reject(request.error)
     })
-  } finally { database.close() }
+  } finally {
+    database.close()
+  }
 }
 
 /**
@@ -50,17 +56,20 @@ async function runTransaction<T>(mode: IDBTransactionMode, action: (store: IDBOb
  * @param projectId 项目 ID
  * @returns 项目草稿，不存在时为 undefined
  */
-export const getDraft = (projectId: number) => runTransaction<ProjectDraft | undefined>('readonly', (store) => store.get(projectId))
+export const getDraft = (projectId: number) =>
+  runTransaction<ProjectDraft | undefined>('readonly', (store) => store.get(projectId))
 /**
  * 以项目 ID 写入或替换本地草稿，保留基准版本供恢复判断。
  *
  * @param draft 含基准版本的本地草稿
  * @returns 已写入草稿的 IndexedDB 主键
  */
-export const putDraft = (draft: ProjectDraft) => runTransaction<IDBValidKey>('readwrite', (store) => store.put(draft))
+export const putDraft = (draft: ProjectDraft) =>
+  runTransaction<IDBValidKey>('readwrite', (store) => store.put(draft))
 /**
  * 删除指定项目的本地草稿。
  *
  * @param projectId 项目 ID
  */
-export const deleteDraft = (projectId: number) => runTransaction<undefined>('readwrite', (store) => store.delete(projectId))
+export const deleteDraft = (projectId: number) =>
+  runTransaction<undefined>('readwrite', (store) => store.delete(projectId))

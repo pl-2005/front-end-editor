@@ -34,7 +34,9 @@ describe('prepareSandpackFiles', () => {
   it('preserves a user-managed package file', () => {
     const files = {
       '/index.js': { code: '' },
-      '/package.json': { code: JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '^7.0.0' } }) },
+      '/package.json': {
+        code: JSON.stringify({ scripts: { dev: 'vite' }, devDependencies: { vite: '^7.0.0' } }),
+      },
     }
 
     expect(prepareSandpackFiles(files)).toBe(files)
@@ -42,7 +44,12 @@ describe('prepareSandpackFiles', () => {
 
   it('migrates the unsupported Nodebox host command', () => {
     const files = {
-      '/package.json': { code: JSON.stringify({ scripts: { dev: 'vite --host 0.0.0.0' }, devDependencies: { vite: '4.1.4' } }) },
+      '/package.json': {
+        code: JSON.stringify({
+          scripts: { dev: 'vite --host 0.0.0.0' },
+          devDependencies: { vite: '4.1.4' },
+        }),
+      },
     }
 
     const packageJson = JSON.parse(prepareSandpackFiles(files)['/package.json']?.code ?? '{}')
@@ -51,7 +58,9 @@ describe('prepareSandpackFiles', () => {
 
   it('keeps optional chaining and local CSS imports intact for Vite', () => {
     const files = {
-      '/index.html': { code: '<html><head></head><body><script type="module" src="/index.js"></script></body></html>' },
+      '/index.html': {
+        code: '<html><head></head><body><script type="module" src="/index.js"></script></body></html>',
+      },
       '/index.js': { code: 'import "./styles.css";\ndocument.querySelector("#action")?.remove()' },
       '/styles.css': { code: 'body { color: red; }' },
     }

@@ -13,9 +13,12 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         '/api': env.LOCAL_API_URL || 'http://localhost:8080',
-        '^/collaboration$': { target: env.LOCAL_COLLAB_URL || `ws://127.0.0.1:${env.COLLAB_GATEWAY_PORT || 8092}`, ws: true, rewriteWsOrigin: false },
+        '^/collaboration$': {
+          target: env.LOCAL_COLLAB_URL || `ws://127.0.0.1:${env.COLLAB_GATEWAY_PORT || 8092}`,
+          ws: true,
+          rewriteWsOrigin: false,
+        },
       },
     },
   }
 })
-

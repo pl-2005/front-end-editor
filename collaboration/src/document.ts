@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { readDirectories } from './directories.js'
 import { randomUUID } from 'node:crypto'
 import { documentFingerprint, LIMITS, resolvedPaths, validatePath } from './document-rules.js'
 export { LIMITS, validatePath } from './document-rules.js'
@@ -8,7 +9,7 @@ export type Identity = { projectId: number; epoch: number }
 export function fingerprint(doc: Y.Doc): string {
   return documentFingerprint(doc.getMap('meta').toJSON(), doc.getArray<string>('fileOrder').toArray(),
     [...doc.getMap<Y.Map<unknown>>('files')].map(([id, f]) => ({ id, path: f.get('path') as string, language: f.get('language') as string,
-      deletedAt: f.get('deletedAt') as number | null, code: (f.get('content') as Y.Text).toString() })), Y.encodeStateVector(doc))
+      deletedAt: f.get('deletedAt') as number | null, code: (f.get('content') as Y.Text).toString() })), Y.encodeStateVector(doc), readDirectories(doc))
 }
 
 /**
@@ -76,9 +77,10 @@ export function createDocument(value: Identity, entry: string, files: FileInput[
  */
 export function validateDocument(doc: Y.Doc, expected: Identity, allowPathConflicts = false): void {
   identity(expected)
-  if ([...doc.share.keys()].some(key => !['meta', 'files', 'fileOrder'].includes(key))) throw new Error('Unknown document root')
+  if ([...doc.share.keys()].some(key => !['meta', 'files', 'fileOrder', 'directories'].includes(key))) throw new Error('Unknown document root')
   const meta = doc.getMap('meta'), files = doc.getMap('files'), order = doc.getArray<string>('fileOrder')
   if (meta.size !== 4 || meta.get('schemaVersion') !== 1 || meta.get('projectId') !== expected.projectId || meta.get('epoch') !== expected.epoch) throw new Error('Invalid document metadata')
+  readDirectories(doc)
   if (!files.size || files.size > LIMITS.files) throw new Error('Invalid file count')
   const ids = order.toArray()
   if (ids.length !== files.size || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !files.has(id))) throw new Error('Invalid file order')
@@ -140,8 +142,11 @@ export function copyDocument(bytes: Uint8Array, source: Identity, target: Identi
   const doc = loadDocument(bytes, source)
   try {
     const files = doc.getMap<Y.Map<unknown>>('files'), entryId = doc.getMap('meta').get('entryFileId') as string
-    return createDocument(target, files.get(entryId)!.get('path') as string,
+    const copy = createDocument(target, files.get(entryId)!.get('path') as string,
       doc.getArray<string>('fileOrder').toArray().filter(id => files.get(id)!.get('deletedAt') === null)
         .map(id => ({ path: files.get(id)!.get('path') as string, code: (files.get(id)!.get('content') as Y.Text).toString() })))
+    const directories = readDirectories(doc)
+    directories.forEach(path => copy.getMap('directories').set(path, true))
+    return copy
   } finally { doc.destroy() }
 }

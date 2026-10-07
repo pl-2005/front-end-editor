@@ -167,6 +167,12 @@ public class TeamController {
             @RequestParam @NotBlank @Size(max = 254) String identifier) {
         return ApiResponse.ok(teams.lookupInvitee(teamId, CurrentUser.id(), identifier));
     }
+    /** 由团队所有者模糊搜索可邀请用户，最多返回 20 条公开账号资料。 */
+    @GetMapping("/{teamId}/invitees/search")
+    ApiResponse<java.util.List<TeamService.InviteeView>> searchInvitees(@PathVariable @Min(1) long teamId,
+            @RequestParam @NotBlank @Size(max = 254) String query) {
+        return ApiResponse.ok(teams.searchInvitees(teamId, CurrentUser.id(), query));
+    }
     /**
      * 为当前所有者返回团队邀请记录。
      *

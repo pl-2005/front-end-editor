@@ -7,14 +7,19 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "format": "prettier --write src *.ts *.js *.json index.html",
+    "format:check": "prettier --check src *.ts *.js *.json index.html",
     "test": "vitest run --configLoader runner",
     "test:watch": "vitest --configLoader runner",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.4",
     "@codesandbox/sandpack-react": "^2.20.0",
     "@hocuspocus/provider": "4.7.0",
     "@vitejs/plugin-react": "latest",
+    "antd": "^6.6.5",
+    "fflate": "^0.8.3",
     "monaco-editor": "0.52.2",
     "react": "latest",
     "react-dom": "latest",
@@ -38,6 +43,7 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "latest",
     "jsdom": "^29.1.1",
+    "prettier": "3.9.6",
     "typescript": "latest",
     "typescript-eslint": "latest",
     "vitest": "^5.0.1"

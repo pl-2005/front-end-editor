@@ -14,21 +14,31 @@ interface Props {
  *
  * @param value 修订创建时间字符串
  */
-const formatDate = (value: string) => new Intl.DateTimeFormat('zh-CN', {
-  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-}).format(new Date(value))
+const formatDate = (value: string) =>
+  new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
 
 /**
  * 将字节数显示为 B 或保留一位小数的 KB。
  *
  * @param bytes 字节数
  */
-const formatSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
+const formatSize = (bytes: number) =>
+  bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
 
 /**
  * 管理历史面板的加载和恢复状态，展示修订并提示恢复时的未保存风险。
  */
-export function RevisionHistory({ projectId, currentVersion, hasUnsavedChanges, onRestored }: Props) {
+export function RevisionHistory({
+  projectId,
+  currentVersion,
+  hasUnsavedChanges,
+  onRestored,
+}: Props) {
   const [open, setOpen] = useState(false)
   const [revisions, setRevisions] = useState<ProjectRevision[]>([])
   const [loading, setLoading] = useState(false)
@@ -59,7 +69,8 @@ export function RevisionHistory({ projectId, currentVersion, hasUnsavedChanges, 
    */
   const restore = async (revision: ProjectRevision) => {
     const warning = hasUnsavedChanges ? '当前未保存更改会被放弃。' : ''
-    if (!window.confirm(`${warning}确定恢复版本 ${revision.version}？恢复操作会创建一个新版本。`)) return
+    if (!window.confirm(`${warning}确定恢复版本 ${revision.version}？恢复操作会创建一个新版本。`))
+      return
     setRestoring(revision.version)
     setError(undefined)
     try {
@@ -73,17 +84,48 @@ export function RevisionHistory({ projectId, currentVersion, hasUnsavedChanges, 
     }
   }
 
-  return <div className="revision-history">
-    <button type="button" onClick={toggle} aria-expanded={open}>版本历史</button>
-    {open ? <aside className="revision-popover" aria-label="版本历史">
-      <div className="revision-title"><strong>版本历史</strong><button type="button" onClick={() => setOpen(false)}>×</button></div>
-      {error ? <p className="revision-error">{error}</p> : null}
-      {loading ? <p className="revision-empty">正在加载…</p> : null}
-      {!loading && revisions.length === 0 ? <p className="revision-empty">暂无已保存版本</p> : null}
-      <ol>{revisions.map((revision) => <li key={revision.version}>
-        <div><strong>版本 {revision.version}</strong>{revision.current ? <span>当前</span> : null}<small>{formatDate(revision.createdAt)} · {formatSize(revision.sizeBytes)}</small></div>
-        {!revision.current ? <button type="button" disabled={restoring !== undefined} onClick={() => void restore(revision)}>{restoring === revision.version ? '恢复中…' : '恢复'}</button> : null}
-      </li>)}</ol>
-    </aside> : null}
-  </div>
+  return (
+    <div className="revision-history">
+      <button type="button" onClick={toggle} aria-expanded={open}>
+        版本历史
+      </button>
+      {open ? (
+        <aside className="revision-popover" aria-label="版本历史">
+          <div className="revision-title">
+            <strong>版本历史</strong>
+            <button type="button" onClick={() => setOpen(false)}>
+              ×
+            </button>
+          </div>
+          {error ? <p className="revision-error">{error}</p> : null}
+          {loading ? <p className="revision-empty">正在加载…</p> : null}
+          {!loading && revisions.length === 0 ? (
+            <p className="revision-empty">暂无已保存版本</p>
+          ) : null}
+          <ol>
+            {revisions.map((revision) => (
+              <li key={revision.version}>
+                <div>
+                  <strong>版本 {revision.version}</strong>
+                  {revision.current ? <span>当前</span> : null}
+                  <small>
+                    {formatDate(revision.createdAt)} · {formatSize(revision.sizeBytes)}
+                  </small>
+                </div>
+                {!revision.current ? (
+                  <button
+                    type="button"
+                    disabled={restoring !== undefined}
+                    onClick={() => void restore(revision)}
+                  >
+                    {restoring === revision.version ? '恢复中…' : '恢复'}
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </aside>
+      ) : null}
+    </div>
+  )
 }

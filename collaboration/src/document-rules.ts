@@ -1,5 +1,5 @@
 /** Protocol rules shared by the browser and the gateway. No Node APIs. */
-export const LIMITS = Object.freeze({ files: 100, fileBytes: 1024 * 1024, totalBytes: 10 * 1024 * 1024, documentBytes: 12 * 1024 * 1024, updateBytes: 2 * 1024 * 1024 })
+export const LIMITS = Object.freeze({ files: 100, directories: 100, fileBytes: 1024 * 1024, totalBytes: 10 * 1024 * 1024, documentBytes: 12 * 1024 * 1024, updateBytes: 2 * 1024 * 1024 })
 export const FILE_LANGUAGES: Readonly<Record<string, string>> = Object.freeze({ html: 'html', css: 'css', js: 'javascript', json: 'json', txt: 'plaintext', md: 'markdown' })
 export function validatePath(path: string): string {
   if (typeof path !== 'string' || path !== path.normalize('NFKC') || path.length > 255 || !path.startsWith('/')
@@ -37,7 +37,7 @@ export function resolvedPaths(files: { id: string; path: string }[]): Map<string
 }
 /** GC and undo retain different binary tombstones. Plain schema plus CRDT clocks
  * covers text deletes without confusing retained undo data with unsynced edits. */
-export function documentFingerprint(meta: Record<string, unknown>, order: string[], files: { id: string; path: string; language: string; deletedAt: number | null; code: string }[], vector: Uint8Array): string {
-  return JSON.stringify({ meta: Object.keys(meta).sort().map(key => [key, meta[key]]), order,
+export function documentFingerprint(meta: Record<string, unknown>, order: string[], files: { id: string; path: string; language: string; deletedAt: number | null; code: string }[], vector: Uint8Array, directories: string[] = []): string {
+  return JSON.stringify({ meta: Object.keys(meta).sort().map(key => [key, meta[key]]), order, ...(directories.length ? { directories: [...directories].sort() } : {}),
     files: [...files].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map(f => [f.id, f.path, f.language, f.deletedAt, f.code]), vector: [...vector] })
 }

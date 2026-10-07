@@ -43,28 +43,56 @@ public class ProjectTemplateService {
                           box-sizing: border-box;
                         }
                         body {
-                          margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, sans-serif; color: #eef2e9; background: #121510;
+                          margin: 0;
+                          min-height: 100vh;
+                          display: grid;
+                          place-items: center;
+                          padding: 24px;
+                          font-family: system-ui, sans-serif;
+                          color: #1e293b;
+                          background: #f5f7fb;
+                          color-scheme: light;
                         }
                         .card {
-                          width: min(400px, 90vw); padding: 32px; border: 1px solid #3a4135; border-radius: 24px; text-align: center;
+                          width: min(400px, 90vw);
+                          padding: 32px;
+                          border: 1px solid #dbe3ee;
+                          border-radius: 24px;
+                          background: #ffffff;
+                          box-shadow: 0 12px 36px #0f172a0d;
+                          text-align: center;
                         }
                         h1 {
-                          margin: 0; font-size: 28px;
+                          margin: 0;
+                          font-size: 28px;
                         }
                         .count {
-                          margin: 24px 0; color: #b6f36b; font-size: 72px; font-weight: 700; font-variant-numeric: tabular-nums;
+                          margin: 24px 0;
+                          color: #2563eb;
+                          font-size: 72px;
+                          font-weight: 700;
+                          font-variant-numeric: tabular-nums;
                         }
                         .actions {
-                          display: flex; justify-content: center; gap: 12px;
+                          display: flex;
+                          justify-content: center;
+                          gap: 12px;
                         }
                         button {
-                          padding: 10px 18px; border: 0; border-radius: 999px; color: #121510; background: #b6f36b; font: inherit; cursor: pointer;
+                          padding: 10px 18px;
+                          border: 0;
+                          border-radius: 999px;
+                          color: #ffffff;
+                          background: #2563eb;
+                          font: inherit;
+                          cursor: pointer;
                         }
                         button:hover {
-                          background: #c9ff8c;
+                          background: #1d4ed8;
                         }
                         button:focus-visible {
-                          outline: 2px solid #eef2e9; outline-offset: 4px;
+                          outline: 2px solid #2563eb;
+                          outline-offset: 4px;
                         }
                         """),
                 new CollabInitializer.FileInput("/index.js", """

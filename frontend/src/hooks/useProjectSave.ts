@@ -26,7 +26,14 @@ const fingerprint = (entry: string, files: ProjectFiles) => JSON.stringify({ ent
  * 维护保存状态和快照版本，持久化本地草稿，并提供串行自动保存、快捷键及联网重试。
  * @returns 保存状态、展示消息及手动保存函数
  */
-export function useProjectSave({ projectId, initialVersion, entry, files, onVersionChange, initiallyDirty = false }: Options) {
+export function useProjectSave({
+  projectId,
+  initialVersion,
+  entry,
+  files,
+  onVersionChange,
+  initiallyDirty = false,
+}: Options) {
   const [status, setStatus] = useState<SaveStatus>('saved')
   const [message, setMessage] = useState('所有更改均已保存')
   const versionRef = useRef(initialVersion)
@@ -43,7 +50,13 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
       setStatus('dirty')
       setMessage('有未保存的更改')
     }
-    void putDraft({ projectId, baseVersion: versionRef.current, entry, files, updatedAt: Date.now() })
+    void putDraft({
+      projectId,
+      baseVersion: versionRef.current,
+      entry,
+      files,
+      updatedAt: Date.now(),
+    })
   }, [entry, files, projectId])
 
   /**
@@ -65,7 +78,12 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
         setStatus('saving')
         setMessage('正在保存…')
         try {
-          const result = await saveSnapshot(projectId, versionRef.current, latest.entry, latest.files)
+          const result = await saveSnapshot(
+            projectId,
+            versionRef.current,
+            latest.entry,
+            latest.files,
+          )
           versionRef.current = result.version
           lastSavedRef.current = nextFingerprint
           onVersionChange(projectId, result.version, result.stateVersion)
@@ -75,17 +93,29 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
             setMessage(`已保存 · 版本 ${result.version}`)
           } else {
             const next = latestRef.current
-            await putDraft({ projectId, baseVersion: result.version, entry: next.entry, files: next.files, updatedAt: Date.now() })
+            await putDraft({
+              projectId,
+              baseVersion: result.version,
+              entry: next.entry,
+              files: next.files,
+              updatedAt: Date.now(),
+            })
             pendingSaveRef.current = true
             setStatus('dirty')
             setMessage('有未保存的更改')
           }
         } catch (error) {
-          await putDraft({ projectId, baseVersion: versionRef.current, entry: latest.entry, files: latest.files, updatedAt: Date.now() }).catch(() => undefined)
+          await putDraft({
+            projectId,
+            baseVersion: versionRef.current,
+            entry: latest.entry,
+            files: latest.files,
+            updatedAt: Date.now(),
+          }).catch(() => undefined)
           if (error instanceof ApiError && error.status === 409) {
             conflictRef.current = true
             setStatus('conflict')
-            setMessage('检测到版本冲突，请重新加载项目或另存副本')
+            setMessage(error.responseMessage ?? '检测到版本冲突，请重新加载项目或另存副本')
           } else {
             setStatus('failed')
             setMessage(error instanceof Error ? error.message : '保存失败，草稿已保留')
@@ -93,7 +123,9 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
           break
         }
       } while (pendingSaveRef.current)
-    } finally { savingRef.current = false }
+    } finally {
+      savingRef.current = false
+    }
   }, [onVersionChange, projectId])
 
   useEffect(() => {
@@ -109,7 +141,10 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
      * @param event 浏览器输入事件
      */
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save() }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault()
+        void save()
+      }
     }
     /**
      * 网络恢复时尝试保存尚未提交的项目更改。
@@ -117,7 +152,10 @@ export function useProjectSave({ projectId, initialVersion, entry, files, onVers
     const handleOnline = () => void save()
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('online', handleOnline)
-    return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('online', handleOnline) }
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('online', handleOnline)
+    }
   }, [save])
 
   return { status, message, save }

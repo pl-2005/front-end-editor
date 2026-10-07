@@ -6,11 +6,13 @@ import { PreviewConsole } from './PreviewConsole'
 vi.mock('@codesandbox/sandpack-react', () => ({
   SandpackConsole: () => {
     const [tab, setTab] = useState('server')
-    return <div>
-      <button onClick={() => setTab('server')}>Server</button>
-      <button onClick={() => setTab('client')}>Client</button>
-      <pre>{tab === 'client' ? '1' : 'Vite server ready'}</pre>
-    </div>
+    return (
+      <div>
+        <button onClick={() => setTab('server')}>Server</button>
+        <button onClick={() => setTab('client')}>Client</button>
+        <pre>{tab === 'client' ? '1' : 'Vite server ready'}</pre>
+      </div>
+    )
   },
 }))
 

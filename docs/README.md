@@ -13,6 +13,7 @@
 | 追踪连接、同步、保存、删除和恢复 | [V2 数据流](V__2/data-flow.md) |
 | 对接身份、团队和项目 REST | [V2 API](V__2/api.md) |
 | 开发、配置、构建和验证 | [V2 开发指南](V__2/development.md) |
+| 开发刷新后保持登录的 Cookie 会话方案（待开发） | [浏览器登录会话恢复](auth-session/README.md) |
 | 对接 Y.Doc、票据、HMAC 和网关 | [协作模块](../collaboration/README.md) |
 | 指标、停写、联合备份和当前内容恢复 | [运维说明](V__2/step10-operations.md) |
 | 打包、发布、回滚和完整本机运行 | [发布说明](V__2/step11-release.md) |

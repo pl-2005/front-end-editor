@@ -228,10 +228,22 @@ public class TeamService {
         return new InviteeView(target.getId(), target.getUsername(), target.getDisplayName());
     }
     /**
-     * 规范化用户名或邮箱后查找已注册用户，未找到时返回 USER_NOT_FOUND。
+     * 由所有者按用户名或邮箱关键词模糊查找可邀请用户，最多返回 20 条。
      *
-     * @param identifier 用户名或邮箱
+     * @param teamId 团队 ID
+     * @param userId 当前用户 ID
+     * @param query 搜索关键词
      */
+    @Transactional(readOnly = true)
+    public List<InviteeView> searchInvitees(long teamId, long userId, String query) {
+        access.owner(teamId, userId);
+        String normalized = IdentityInput.normalize(query, 254);
+        return users.searchInvitees(teamId, normalized, PageRequest.of(0, 20)).stream()
+                .map(target -> new InviteeView(target.getId(), target.getUsername(), target.getDisplayName()))
+                .toList();
+    }
+
+    /** 规范化用户名或邮箱后精确查找已注册用户。 */
     private AppUser findInvitee(String identifier) {
         boolean byEmail = identifier != null && identifier.contains("@");
         String normalized = IdentityInput.normalize(identifier, byEmail ? 254 : 50);

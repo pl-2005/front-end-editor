@@ -49,7 +49,7 @@ MySQL、MinIO 和 Redis 的实际地址以根 `.env` 为准。内部路径由浏
 
 | 模块 | 技术与职责 |
 | --- | --- |
-| `frontend/` | React、TypeScript、Vite、Monaco、Yjs、Sandpack、IndexedDB；身份与团队界面、协作编辑和预览 |
+| `frontend/` | React、TypeScript、Vite、Ant Design、Monaco、Yjs、Sandpack、IndexedDB；身份与团队界面、协作编辑和预览 |
 | `backend/` | Java 21、Spring Boot 3.5、Security、JPA、Flyway；身份、授权、元数据、指针与控制事件 |
 | `collaboration/` | Node.js 24+、Hocuspocus 4.7、Yjs；初始化、网关、自动持久化和运维工具 |
 | 数据服务 | MySQL 8、私有 MinIO、Redis；Node 接收端以 SQLite 持久化 nonce/fence |

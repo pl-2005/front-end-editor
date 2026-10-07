@@ -55,6 +55,8 @@ flowchart LR
 
 Y.Doc schemaVersion=1 包含 `meta`、`files` 和 `fileOrder`。对象路径为 `collab/projects/{projectId}/epochs/{epoch}/{generation}-{hash}.yjs`；先上传不可变对象，再 CAS 切换指针。`generation` 是持久化序号，`epoch` 隔离旧文档，两者都不是用户历史版本。
 
+文件管理扩展增加可选根映射 `directories: Y.Map<path, true>`，用于保存空目录并避免首次并发创建丢失目录。浏览器、网关和初始化服务同步支持该映射，并沿用原有指纹、持久化、复制及离线日志链路；详见[文件管理交互](file-explorer.md)。已有目录数据的文档不能回滚到不支持该扩展的旧服务。
+
 Flyway 迁移已落地至 V13：V1/V2 保留旧快照表与约束；V3 元数据锁；V4/V5 身份水位；V6–V9 团队与邀请；V10 当前协作存储；V11 票据/nonce；V12 删除/Outbox；V13 恢复。只追加迁移，不改写已发布脚本；步骤 11 没有新增认证切换迁移。
 
 ## 安全与故障边界

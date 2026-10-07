@@ -6,12 +6,15 @@ export function PreviewConsole() {
   const host = useRef<HTMLDivElement>(null)
 
   useLayoutEffect(() => {
-    const clientTab = Array.from(host.current?.querySelectorAll('button') ?? [])
-      .find(button => button.textContent?.trim() === 'Client')
+    const clientTab = Array.from(host.current?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent?.trim() === 'Client',
+    )
     clientTab?.click()
   }, [])
 
-  return <div ref={host} style={{ height: '100%' }}>
-    <SandpackConsole resetOnPreviewRestart />
-  </div>
+  return (
+    <div ref={host} style={{ height: '100%' }}>
+      <SandpackConsole resetOnPreviewRestart />
+    </div>
+  )
 }
