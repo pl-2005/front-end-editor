@@ -88,11 +88,11 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
 /**
  * 渲染团队应用公共导航和当前账号，提供退出所有设备操作。
  */
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   const user = useSyncExternalStore(subscribeAuth, getAuthUser)
   const navigate = useNavigate()
   const task = useTask()
-  return <main className="v2-shell">
+  return <main className={`v2-shell${wide ? ' v2-shell-wide' : ''}`}>
     <header className="v2-topbar"><Link className="v2-brand" to="/teams">W/ <span>WEB EDITOR</span></Link>
       <nav aria-label="主导航"><Link to="/teams">我的团队</Link><Link to="/discover">发现团队</Link><Link to="/invitations">我的邀请</Link></nav>
       <div className="v2-account"><span>{user?.displayName}</span><button type="button" disabled={task.busy} onClick={() => void task.run(async () => { await logout(); navigate('/login', { replace: true }) })}>退出所有设备</button></div>
@@ -325,7 +325,7 @@ function ProjectPage() {
       .catch(error => { if (!controller.signal.aborted) setLoadError(message(error)) })
     return () => controller.abort()
   }, [teamId, projectId])
-  return <Shell><section className="v2-section"><div className="v2-heading"><div><p><Link to={`/teams/${teamId}`}>团队项目</Link> / 项目</p><h1>{project?.name ?? '正在加载项目…'}</h1></div></div><Feedback error={loadError || task.error} notice={task.notice} />
+  return <Shell wide><section className="v2-section v2-project-section"><div className="v2-heading"><div><p><Link to={`/teams/${teamId}`}>团队项目</Link> / 项目</p><h1>{project?.name ?? '正在加载项目…'}</h1></div></div><Feedback error={loadError || task.error} notice={task.notice} />
     {project ? <div className="v2-panel"><div className="v2-actions"><button type="button" disabled={task.busy} onClick={() => {
       const name = window.prompt('新的项目名称', project.name)?.trim()
       if (name && name !== project.name) void runProject(async () => { const next = await teams.updateTeamProject(teamId, project, name); setProject({ ...project, ...next }) }, '项目已重命名。')

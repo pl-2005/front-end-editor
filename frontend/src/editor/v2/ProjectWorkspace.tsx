@@ -11,6 +11,8 @@ function ConnectedWorkspace({ session }: { session: CollaborationSession }) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot)
   const doc = session.doc
   const [chosenId, setChosenId] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('')
+  const [showFiles, setShowFiles] = useState(true)
+  const [showCode, setShowCode] = useState(true)
   useEffect(() => {
     if (state.connection === 'forbidden') return
     const files = doc.getMap('files')
@@ -73,7 +75,13 @@ function ConnectedWorkspace({ session }: { session: CollaborationSession }) {
     {state.error || error ? <p className="v2-error" role="alert">{state.error || error}</p> : null}
     {notice ? <p className="v2-notice" role="status">{notice}</p> : null}
     {document?.conflicts.length ? <p role="status">同路径冲突已归一化：{document.conflicts.join('；')}</p> : null}
-    {document ? <div className="v2-workspace-grid"><aside className="v2-file-panel"><div className="v2-actions"><strong>文件</strong><button type="button" disabled={!state.writable} onClick={() => {
+    {document ? <><div className="v2-workspace-toolbar" aria-label="工作区布局"><strong>渲染预览</strong><div className="v2-actions">
+      <button type="button" aria-expanded={showFiles} aria-controls="project-files-panel" onClick={() => setShowFiles(value => !value)}>{showFiles ? '收起文件栏' : '展开文件栏'}</button>
+      <button type="button" aria-expanded={showCode} aria-controls="project-code-panel" onClick={() => setShowCode(value => !value)}>{showCode ? '收起代码栏' : '展开代码栏'}</button>
+      <button type="button" aria-pressed={!showFiles && !showCode} onClick={() => {
+        const show = !showFiles && !showCode; setShowFiles(show); setShowCode(show)
+      }}>{!showFiles && !showCode ? '返回编辑' : '展示渲染页'}</button>
+    </div></div><div className="v2-workspace-grid" data-files-visible={showFiles} data-code-visible={showCode}><aside id="project-files-panel" className="v2-file-panel" hidden={!showFiles}><div className="v2-actions"><strong>文件</strong><button type="button" disabled={!state.writable} onClick={() => {
       const value = window.prompt('文件路径，例如 /scripts/helper.js'); if (value) run(() => setChosenId(commands.create(value)))
     }}>新建文件</button></div><ul aria-label="项目文件">{document.files.map(file => <li key={file.id}>
       <button type="button" className={file.id === activeId ? 'active' : ''} aria-pressed={file.id === activeId} onClick={() => setChosenId(file.id)}>{file.path}{file.id === document.entryFileId ? '（入口）' : ''}</button>
@@ -82,8 +90,8 @@ function ConnectedWorkspace({ session }: { session: CollaborationSession }) {
       }}>重命名</button><button type="button" disabled={!state.writable || file.id === document.entryFileId} aria-label={`删除 ${file.path}`} onClick={() => {
         if (window.confirm(`删除 ${file.path}？`)) run(() => commands.remove(file.id))
       }}>删除</button>{file.language === 'html' ? <button type="button" disabled={!state.writable || file.id === document.entryFileId} aria-label={`设为入口 ${file.path}`} onClick={() => run(() => commands.setEntry(file.id))}>设为入口</button> : null}</div>
-    </li>)}</ul></aside><MonacoWorkspace session={session} files={document.files} activeId={activeId} writable={state.writable} />
-      <SandpackBridge session={session} entry={entry} structureKey={JSON.stringify(document.files.map(f => f.path).sort())} /></div> : <p>{state.connection === 'failed' ? '协作服务不可用，文档尚未加载。' : state.connection === 'forbidden' ? '项目授权已失效，文档已清除。' : '正在加载协作文档…'}</p>}
+    </li>)}</ul></aside><div id="project-code-panel" className="v2-code-panel" hidden={!showCode}><MonacoWorkspace session={session} files={document.files} activeId={activeId} writable={state.writable} /></div>
+      <SandpackBridge session={session} entry={entry} structureKey={JSON.stringify(document.files.map(f => f.path).sort())} /></div></> : <p>{state.connection === 'failed' ? '协作服务不可用，文档尚未加载。' : state.connection === 'forbidden' ? '项目授权已失效，文档已清除。' : '正在加载协作文档…'}</p>}
   </section>
 }
 export default function ProjectWorkspace({ project, userId, teamId }: { project: TeamProjectDetails; userId: number; teamId: number }) {
