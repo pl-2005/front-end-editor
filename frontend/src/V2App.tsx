@@ -41,11 +41,14 @@ import {
   DownOutlined,
   EditOutlined,
   CopyOutlined,
+  DownloadOutlined,
   DeleteOutlined,
   ReloadOutlined,
+  ArrowLeftOutlined,
 } from '@ant-design/icons'
 import { AppTheme } from './ui/AppTheme'
 import { useDialogs } from './ui/useDialogs'
+import { ProjectEditDialog } from './ui/ProjectEditDialog'
 import { getAuthUser, login, logout, register, subscribeAuth } from './api/auth'
 import { ApiError } from './api/client'
 import { useFeedback, useNotice } from './ui/useNotice'
@@ -233,7 +236,7 @@ function AuthPage({ mode }: { mode: 'login' | 'register' }) {
 /**
  * 渲染团队应用公共导航和当前账号，提供退出当前用户操作。
  */
-function Shell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
+function Shell({ children }: { children: React.ReactNode }) {
   const [topbarCollapsed, setTopbarCollapsed] = useState(false)
   const user = useSyncExternalStore(subscribeAuth, getAuthUser)
   const navigate = useNavigate()
@@ -241,7 +244,7 @@ function Shell({ children, wide = false }: { children: React.ReactNode; wide?: b
   const task = useTask()
   const selected = pathname.startsWith('/teams') ? '/teams' : pathname
   return (
-    <Layout className={`v2-shell${wide ? ' v2-shell-wide' : ''}`}>
+    <Layout className="v2-shell">
       <Layout.Header className={`v2-topbar${topbarCollapsed ? ' v2-topbar-collapsed' : ''}`}>
         <div id="v2-topbar-content" className="v2-topbar-content" hidden={topbarCollapsed}>
           <Link className="v2-brand" to="/teams">
@@ -326,8 +329,36 @@ function Shell({ children, wide = false }: { children: React.ReactNode; wide?: b
 }
 
 /**
- * 加载当前用户团队列表，并提供团队创建及导航。
+ * 渲染面包屑及返回上级按钮，没有父路由的页面禁用按钮。
  */
+function RouteBreadcrumb({
+  children,
+  parentPath,
+}: {
+  children: React.ReactNode
+  parentPath?: string
+}) {
+  const navigate = useNavigate()
+  return (
+    <nav className="v2-route-navigation" aria-label="面包屑">
+      <Button
+        type="text"
+        size="small"
+        htmlType="button"
+        icon={<ArrowLeftOutlined />}
+        aria-label="返回上一级"
+        title="返回上一级"
+        disabled={!parentPath}
+        onClick={() => {
+          if (parentPath) navigate(parentPath)
+        }}
+      />
+      <p>{children}</p>
+    </nav>
+  )
+}
+
+/** 加载当前用户团队列表，并提供团队创建及导航。 */
 function TeamListPage() {
   const navigate = useNavigate()
   const task = useTask()
@@ -357,7 +388,9 @@ function TeamListPage() {
       <section className="v2-section">
         <div className="v2-heading v2-team-heading">
           <div>
-            <p>工作区</p>
+            <RouteBreadcrumb>
+              <span aria-current="page">我的团队</span>
+            </RouteBreadcrumb>
             <h1>我的团队</h1>
           </div>
           <Button type="primary" onClick={() => setCreateOpen(true)}>
@@ -519,7 +552,7 @@ function DiscoverPage() {
       <section className="v2-section">
         <div className="v2-heading v2-discover-heading">
           <div>
-            <p>加入团队</p>
+            <RouteBreadcrumb>加入团队</RouteBreadcrumb>
             <h1>发现团队</h1>
           </div>
           <Input
@@ -656,7 +689,7 @@ function InvitationsPage() {
       <section className="v2-section">
         <div className="v2-heading">
           <div>
-            <p>加入团队</p>
+            <RouteBreadcrumb>加入团队</RouteBreadcrumb>
             <h1>我的邀请</h1>
           </div>
         </div>
@@ -739,7 +772,6 @@ function LegacyInvitePage() {
  */
 function TeamPage() {
   const dialogs = useDialogs()
-  const showNotice = useNotice()
   const teamId = Number(useParams().teamId)
   const user = useSyncExternalStore(subscribeAuth, getAuthUser)
   const navigate = useNavigate()
@@ -747,15 +779,49 @@ function TeamPage() {
   const [team, setTeam] = useState<Team | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [projects, setProjects] = useState<TeamProjectSummary[]>([])
+  const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectDescription, setNewProjectDescription] = useState('')
+  const [creatingProject, setCreatingProject] = useState(false)
+  const [editingProject, setEditingProject] = useState<TeamProjectSummary | null>(null)
   const [initializingId, setInitializingId] = useState<number | null>(null)
   const [requests, setRequests] = useState<JoinRequest[]>([])
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [inviteIdentifier, setInviteIdentifier] = useState('')
   const [invitees, setInvitees] = useState<Invitee[]>([])
   const [inviteSearchComplete, setInviteSearchComplete] = useState(false)
+  const [inviteSearching, setInviteSearching] = useState(false)
   const inviteSearchVersion = useRef(0)
   const [loadError, setLoadError] = useState('')
   const isOwner = members.some((member) => member.userId === user?.id && member.role === 'OWNER')
+  const { setError } = task
+  useEffect(() => {
+    const query = inviteIdentifier.trim()
+    if (!query || !isOwner) return
+    const controller = new AbortController()
+    const version = inviteSearchVersion.current
+    const timer = window.setTimeout(() => {
+      setInviteSearching(true)
+      void teams
+        .searchInvitees(teamId, query, controller.signal)
+        .then((found) => {
+          if (controller.signal.aborted || version !== inviteSearchVersion.current) return
+          setInvitees(found)
+          setInviteSearchComplete(true)
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted && version === inviteSearchVersion.current)
+            setError(message(error))
+        })
+        .finally(() => {
+          if (!controller.signal.aborted && version === inviteSearchVersion.current)
+            setInviteSearching(false)
+        })
+    }, 300)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [inviteIdentifier, isOwner, teamId, setError])
   /**
    * 并行加载团队基础数据，只有当前用户为所有者时才读取审批及邀请列表；取消时不写入结果。
    *
@@ -834,21 +900,46 @@ function TeamPage() {
   return (
     <Shell>
       <section className="v2-section">
-        <div className="v2-heading">
+        <div className="v2-heading v2-team-detail-heading">
           <div>
-            <p>
-              <Link to="/teams">我的团队</Link> / 团队
-            </p>
-            <h1>{team?.name ?? '正在加载团队…'}</h1>
+            <RouteBreadcrumb parentPath="/teams">
+              <Link to="/teams">我的团队</Link> / <span aria-current="page">团队</span>
+            </RouteBreadcrumb>
+            <div className="v2-team-title">
+              <h1>{team?.name ?? '正在加载团队…'}</h1>
+              {isOwner && team ? (
+                <div className="v2-team-policy">
+                  <Select
+                    aria-label="加入策略"
+                    value={team.joinPolicy}
+                    disabled={task.busy}
+                    onChange={(value: Team['joinPolicy']) =>
+                      void runTeam(async () => {
+                        const next = await teams.setJoinPolicy(teamId, value)
+                        setTeam(next)
+                      })
+                    }
+                    options={[
+                      { value: 'REQUEST', label: '允许申请' },
+                      { value: 'INVITE_ONLY', label: '仅邀请' },
+                    ]}
+                  />
+                </div>
+              ) : null}
+            </div>
             <p>{team?.description}</p>
           </div>
         </div>
 
         {team ? (
-          <>
-            <div className="v2-columns">
+          <div className="v2-team-management">
+            <section className="v2-team-management-column" aria-labelledby="team-members-heading">
+              <div className="v2-team-management-heading">
+                <h2 id="team-members-heading">成员管理</h2>
+                <Tag>{members.length} 位成员</Tag>
+              </div>
               <Card className="v2-panel">
-                <h2>成员</h2>
+                <h3>成员列表</h3>
                 <ul className="v2-list">
                   {members.map((member) => (
                     <li key={member.userId}>
@@ -912,42 +1003,162 @@ function TeamPage() {
                   </Button>
                 ) : null}
               </Card>
+              {isOwner ? (
+                <>
+                  <Card className="v2-panel">
+                    <h3>加入申请</h3>
+                    <ul className="v2-list">
+                      {requests.map((request) => (
+                        <li key={request.id}>
+                          <span>@{request.username}</span>
+                          <span className="v2-actions">
+                            <Button
+                              htmlType="button"
+                              disabled={task.busy}
+                              onClick={() =>
+                                void runTeam(async () => {
+                                  await teams.decideJoin(teamId, request.id, 'approve')
+                                  await reload()
+                                })
+                              }
+                            >
+                              批准
+                            </Button>
+                            <Button
+                              danger
+                              htmlType="button"
+                              disabled={task.busy}
+                              onClick={() =>
+                                void runTeam(async () => {
+                                  await teams.decideJoin(teamId, request.id, 'reject')
+                                  await reload()
+                                })
+                              }
+                            >
+                              拒绝
+                            </Button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {!requests.length ? <p>暂无待审批申请。</p> : null}
+                  </Card>
+                  <Card className="v2-panel">
+                    <div className="v2-invite-heading">
+                      <h3>邀请成员</h3>
+                      <Input
+                        aria-label="用户名或邮箱"
+                        value={inviteIdentifier}
+                        placeholder="请输入用户名或邮箱"
+                        allowClear
+                        maxLength={254}
+                        suffix={inviteSearching ? <Spin size="small" /> : undefined}
+                        onChange={(event) => {
+                          inviteSearchVersion.current++
+                          setInviteIdentifier(event.target.value)
+                          setInvitees([])
+                          setInviteSearchComplete(false)
+                          setInviteSearching(false)
+                        }}
+                      />
+                    </div>
+                    {inviteSearchComplete ? (
+                      <div className="v2-invite-results" aria-label="用户搜索结果">
+                        {invitees.length ? (
+                          <>
+                            <p>
+                              找到 {invitees.length} 位用户，请确认要邀请的账号。
+                              {invitees.length === 20 ? '最多显示 20 位，请细化关键词。' : ''}
+                            </p>
+                            <ul className="v2-list">
+                              {invitees.map((invitee) => (
+                                <li className="v2-invite-result" key={invitee.userId}>
+                                  <span>
+                                    已找到：{invitee.displayName}（@{invitee.username}）
+                                  </span>
+                                  <Button
+                                    htmlType="button"
+                                    disabled={task.busy}
+                                    onClick={() => {
+                                      const version = inviteSearchVersion.current
+                                      void runTeam(async () => {
+                                        await teams.issueInvitation(teamId, invitee.userId)
+                                        await reload()
+                                        if (version === inviteSearchVersion.current)
+                                          setInvitees((found) =>
+                                            found.filter(
+                                              (value) => value.userId !== invitee.userId,
+                                            ),
+                                          )
+                                      }, '邀请已发送，受邀人可在“我的邀请”中处理。')
+                                    }}
+                                  >
+                                    确认发送邀请
+                                  </Button>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        ) : (
+                          <p role="status">没有找到可邀请的用户，请尝试其他关键词。</p>
+                        )}
+                      </div>
+                    ) : null}
+                    <details className="v2-invitation-records">
+                      <summary>邀请记录（{invitations.length}）</summary>
+                      <ul className="v2-list">
+                        {invitations.map((invitation) => (
+                          <li key={invitation.id}>
+                            <span>
+                              {invitation.username ? `@${invitation.username}` : invitation.email}{' '}
+                              <small>{invitation.status}</small>
+                            </span>
+                            {invitation.status === 'PENDING' ? (
+                              <Button
+                                danger
+                                htmlType="button"
+                                disabled={task.busy}
+                                onClick={() =>
+                                  void runTeam(async () => {
+                                    await teams.revokeInvitation(teamId, invitation.id)
+                                    await reload()
+                                  })
+                                }
+                              >
+                                撤销
+                              </Button>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                      {!invitations.length ? <p>暂无邀请记录。</p> : null}
+                    </details>
+                  </Card>
+                </>
+              ) : null}
+            </section>
+            <section className="v2-team-management-column" aria-labelledby="team-projects-heading">
+              <div className="v2-team-management-heading">
+                <h2 id="team-projects-heading">项目管理</h2>
+                <Tag>{projects.length} 个项目</Tag>
+              </div>
               <Card className="v2-panel">
-                <h2>项目</h2>
-                <p>团队成员可以共同编辑项目文件。</p>
-                <form
-                  className="v2-form v2-inline-form"
-                  onSubmit={(event) => {
-                    event.preventDefault()
-                    const form = new FormData(event.currentTarget)
-                    void runTeam(async () => {
-                      try {
-                        const project = await teams.createTeamProject(
-                          teamId,
-                          String(form.get('name')).trim(),
-                        )
-                        navigate(`/teams/${teamId}/projects/${project.id}`)
-                      } catch (error) {
-                        if (error instanceof ApiError && error.initializingProjectId)
-                          setInitializingId(error.initializingProjectId)
-                        throw error
-                      }
-                    })
-                  }}
-                >
-                  <label>
-                    项目名称
-                    <Input name="name" required maxLength={100} />
-                  </label>
+                <div className="v2-team-project-heading">
+                  <h3>团队项目</h3>
                   <Button
                     type="primary"
                     className="v2-primary-button"
-                    htmlType="submit"
+                    htmlType="button"
                     disabled={task.busy}
+                    onClick={() => {
+                      setNewProjectName('')
+                      setNewProjectDescription('')
+                      setCreatingProject(true)
+                    }}
                   >
                     创建项目
                   </Button>
-                </form>
+                </div>
                 {initializingId ? (
                   <Button
                     htmlType="button"
@@ -965,194 +1176,221 @@ function TeamPage() {
                     重试项目初始化
                   </Button>
                 ) : null}
-                <ul className="v2-list">
-                  {projects.map((project) => (
-                    <li key={project.id}>
-                      <Link
-                        className="v2-project-button"
-                        to={`/teams/${teamId}/projects/${project.id}`}
-                      >
-                        {project.name}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-                {!projects.length ? <p>暂无项目。</p> : null}
-              </Card>
-            </div>
-            {isOwner ? (
-              <div className="v2-columns">
-                <Card className="v2-panel">
-                  <h2>加入申请</h2>
-                  <ul className="v2-list">
-                    {requests.map((request) => (
-                      <li key={request.id}>
-                        <span>@{request.username}</span>
-                        <span className="v2-actions">
-                          <Button
-                            htmlType="button"
-                            disabled={task.busy}
-                            onClick={() =>
-                              void runTeam(async () => {
-                                await teams.decideJoin(teamId, request.id, 'approve')
-                                await reload()
-                              })
-                            }
-                          >
-                            批准
-                          </Button>
-                          <Button
-                            danger
-                            htmlType="button"
-                            disabled={task.busy}
-                            onClick={() =>
-                              void runTeam(async () => {
-                                await teams.decideJoin(teamId, request.id, 'reject')
-                                await reload()
-                              })
-                            }
-                          >
-                            拒绝
-                          </Button>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                  {!requests.length ? <p>暂无待审批申请。</p> : null}
-                  <label>
-                    加入策略
-                    <Select
-                      aria-label="加入策略"
-                      value={team.joinPolicy}
-                      disabled={task.busy}
-                      onChange={(value: Team['joinPolicy']) =>
-                        void runTeam(async () => {
-                          const next = await teams.setJoinPolicy(teamId, value)
-                          setTeam(next)
-                        })
+                <Table<TeamProjectSummary>
+                  className="v2-project-table"
+                  rowKey="id"
+                  dataSource={projects}
+                  rowClassName="v2-team-row"
+                  onRow={(project) => ({
+                    tabIndex: 0,
+                    'aria-label': `查看项目 ${project.name}`,
+                    onClick: () => navigate(`/teams/${teamId}/projects/${project.id}`),
+                    onKeyDown: (event) => {
+                      if (event.target !== event.currentTarget) return
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        navigate(`/teams/${teamId}/projects/${project.id}`)
                       }
-                      options={[
-                        { value: 'REQUEST', label: '允许申请' },
-                        { value: 'INVITE_ONLY', label: '仅邀请' },
-                      ]}
-                    />
-                  </label>
-                </Card>
-                <Card className="v2-panel">
-                  <h2>邀请成员</h2>
-                  <form
-                    className="v2-form v2-inline-form"
-                    onSubmit={(event) => {
-                      event.preventDefault()
-                      const query = inviteIdentifier.trim()
-                      if (!query) return
-                      const version = ++inviteSearchVersion.current
-                      setInvitees([])
-                      setInviteSearchComplete(false)
-                      void runTeam(async () => {
-                        const found = await teams.searchInvitees(teamId, query)
-                        if (version === inviteSearchVersion.current) {
-                          setInvitees(found)
-                          setInviteSearchComplete(true)
-                          if (!found.length) showNotice('没有找到可邀请的用户，请尝试其他关键词。')
-                        }
-                      })
-                    }}
-                  >
-                    <label>
-                      用户名或邮箱
-                      <Input
-                        value={inviteIdentifier}
-                        placeholder="输入部分用户名或邮箱"
-                        required
-                        maxLength={254}
-                        onChange={(event) => {
-                          inviteSearchVersion.current++
-                          setInviteIdentifier(event.target.value)
-                          setInvitees([])
-                          setInviteSearchComplete(false)
-                        }}
-                      />
-                    </label>
-                    <Button
-                      type="primary"
-                      className="v2-primary-button"
-                      htmlType="submit"
-                      disabled={task.busy}
-                    >
-                      查找用户
-                    </Button>
-                  </form>
-                  {inviteSearchComplete && invitees.length ? (
-                    <div className="v2-invite-results" aria-label="用户搜索结果">
-                      {invitees.length ? (
-                        <>
-                          <p>
-                            找到 {invitees.length} 位用户，请确认要邀请的账号。
-                            {invitees.length === 20 ? '最多显示 20 位，请细化关键词。' : ''}
-                          </p>
-                          <ul className="v2-list">
-                            {invitees.map((invitee) => (
-                              <li className="v2-invite-result" key={invitee.userId}>
-                                <span>
-                                  已找到：{invitee.displayName}（@{invitee.username}）
-                                </span>
-                                <Button
-                                  htmlType="button"
-                                  disabled={task.busy}
-                                  onClick={() => {
-                                    const version = inviteSearchVersion.current
-                                    void runTeam(async () => {
-                                      await teams.issueInvitation(teamId, invitee.userId)
-                                      await reload()
-                                      if (version === inviteSearchVersion.current)
-                                        setInvitees((found) =>
-                                          found.filter((value) => value.userId !== invitee.userId),
-                                        )
-                                    }, '邀请已发送，受邀人可在“我的邀请”中处理。')
-                                  }}
-                                >
-                                  确认发送邀请
-                                </Button>
-                              </li>
-                            ))}
-                          </ul>
-                        </>
-                      ) : (
-                        <p role="status">没有找到可邀请的用户，请尝试其他关键词。</p>
-                      )}
-                    </div>
-                  ) : null}
-                  <ul className="v2-list">
-                    {invitations.map((invitation) => (
-                      <li key={invitation.id}>
-                        <span>
-                          {invitation.username ? `@${invitation.username}` : invitation.email}{' '}
-                          <small>{invitation.status}</small>
+                    },
+                  })}
+                  pagination={false}
+                  tableLayout="fixed"
+                  scroll={{ x: 600 }}
+                  locale={{ emptyText: <Empty description="暂无项目。" /> }}
+                  columns={[
+                    {
+                      title: '项目名称',
+                      dataIndex: 'name',
+                      width: '30%',
+                      ellipsis: true,
+                      render: (name: string, project) => (
+                        <Link to={`/teams/${teamId}/projects/${project.id}`} title={name}>
+                          {name}
+                        </Link>
+                      ),
+                    },
+                    {
+                      title: '项目描述',
+                      dataIndex: 'description',
+                      ellipsis: true,
+                      render: (description: string | null) => (
+                        <span
+                          className="v2-project-table-description"
+                          title={description || '暂无描述'}
+                        >
+                          {description || '暂无描述'}
                         </span>
-                        {invitation.status === 'PENDING' ? (
-                          <Button
-                            danger
-                            htmlType="button"
-                            disabled={task.busy}
-                            onClick={() =>
-                              void runTeam(async () => {
-                                await teams.revokeInvitation(teamId, invitation.id)
-                                await reload()
-                              })
-                            }
-                          >
-                            撤销
-                          </Button>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                </Card>
-              </div>
-            ) : null}
-          </>
+                      ),
+                    },
+                    {
+                      title: '操作',
+                      key: 'actions',
+                      width: 200,
+                      render: (_, project) => (
+                        <div className="v2-actions" onClick={(event) => event.stopPropagation()}>
+                          <Tooltip title="编辑">
+                            <Button
+                              type="text"
+                              icon={<EditOutlined />}
+                              aria-label="编辑"
+                              disabled={task.busy}
+                              onClick={() => setEditingProject(project)}
+                            />
+                          </Tooltip>
+                          <Tooltip title="复制项目">
+                            <Button
+                              type="text"
+                              icon={<CopyOutlined />}
+                              aria-label="复制项目"
+                              disabled={task.busy}
+                              onClick={async () => {
+                                const name = await dialogs.prompt(
+                                  '副本名称',
+                                  `${project.name} 副本`,
+                                )
+                                if (!name) return
+                                void runTeam(async () => {
+                                  try {
+                                    await teams.copyTeamProject(teamId, project.id, name)
+                                    await reload()
+                                  } catch (error) {
+                                    if (error instanceof ApiError && error.initializingProjectId)
+                                      setInitializingId(error.initializingProjectId)
+                                    throw error
+                                  }
+                                }, '项目已复制。')
+                              }}
+                            />
+                          </Tooltip>
+                          <Tooltip title="导出项目">
+                            <Button
+                              type="text"
+                              icon={<DownloadOutlined />}
+                              aria-label="导出项目"
+                              disabled={task.busy || !user}
+                              onClick={() => {
+                                if (!user) return
+                                void runTeam(async () => {
+                                  const { exportTeamProject } =
+                                    await import('./collaboration/exportTeamProject')
+                                  await exportTeamProject(teamId, project.id, user.id)
+                                })
+                              }}
+                            />
+                          </Tooltip>
+                          <Tooltip title="删除">
+                            <Button
+                              type="text"
+                              danger
+                              icon={<DeleteOutlined />}
+                              aria-label="删除"
+                              disabled={task.busy}
+                              onClick={async () => {
+                                if (
+                                  await dialogs.confirm(
+                                    `确定删除项目“${project.name}”？删除后无法恢复。`,
+                                  )
+                                )
+                                  void runTeam(async () => {
+                                    await teams.deleteTeamProject(teamId, project)
+                                    await reload()
+                                  }, '项目已删除。')
+                              }}
+                            />
+                          </Tooltip>
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
+              </Card>
+            </section>
+          </div>
         ) : null}
+        {editingProject ? (
+          <ProjectEditDialog
+            project={editingProject}
+            busy={task.busy}
+            onCancel={() => setEditingProject(null)}
+            onSave={(name, description) => {
+              void runTeam(async () => {
+                const next = await teams.updateTeamProject(
+                  teamId,
+                  editingProject,
+                  name,
+                  description,
+                )
+                setProjects((current) => current.map((item) => (item.id === next.id ? next : item)))
+                setEditingProject(null)
+              }, '项目已更新。')
+            }}
+          />
+        ) : null}
+        <Modal
+          open={creatingProject}
+          title="创建项目"
+          destroyOnHidden
+          okText="创建"
+          cancelText="取消"
+          confirmLoading={task.busy}
+          okButtonProps={{ htmlType: 'submit', form: 'project-create-form' }}
+          onCancel={() => {
+            if (!task.busy) setCreatingProject(false)
+          }}
+        >
+          <form
+            id="project-create-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const name = newProjectName.trim()
+              if (!name || task.busy) return
+              void runTeam(async () => {
+                try {
+                  const project = await teams.createTeamProject(
+                    teamId,
+                    name,
+                    newProjectDescription.trim() || null,
+                  )
+                  setCreatingProject(false)
+                  navigate(`/teams/${teamId}/projects/${project.id}`)
+                } catch (error) {
+                  if (error instanceof ApiError && error.initializingProjectId) {
+                    setInitializingId(error.initializingProjectId)
+                    setCreatingProject(false)
+                  }
+                  throw error
+                }
+              })
+            }}
+          >
+            <label className="dialog-field">
+              项目名称
+              <Input
+                aria-label="项目名称"
+                placeholder="请输入项目名称"
+                value={newProjectName}
+                onChange={(event) => setNewProjectName(event.target.value)}
+                required
+                pattern=".*\S.*"
+                maxLength={100}
+                disabled={task.busy}
+              />
+            </label>
+            <label className="dialog-field">
+              项目描述（可选）
+              <Input.TextArea
+                aria-label="项目描述"
+                placeholder="项目描述（可选）"
+                value={newProjectDescription}
+                onChange={(event) => setNewProjectDescription(event.target.value)}
+                maxLength={500}
+                rows={4}
+                showCount
+                disabled={task.busy}
+              />
+            </label>
+          </form>
+        </Modal>
         {dialogs.holder}
       </section>
     </Shell>
@@ -1160,7 +1398,7 @@ function TeamPage() {
 }
 
 /**
- * 加载团队项目元数据，提供重命名、当前文档复制和初始化重试。
+ * 加载团队项目元数据，提供名称及描述编辑、当前文档复制和初始化重试。
  */
 function ProjectPage() {
   const dialogs = useDialogs()
@@ -1173,6 +1411,7 @@ function ProjectPage() {
   const [initializingId, setInitializingId] = useState<number | null>(null)
   const [loadError, setLoadError] = useState('')
   const [exportTarget, setExportTarget] = useState<HTMLSpanElement | null>(null)
+  const [editingProject, setEditingProject] = useState(false)
   /**
    * 包装项目操作，遇到权限或资源错误时清除详情并返回团队列表。
    *
@@ -1203,33 +1442,28 @@ function ProjectPage() {
   }, [teamId, projectId])
   useFeedback({ error: loadError })
   return (
-    <Shell wide>
+    <Shell>
       <section className="v2-section v2-project-section">
         <div className="v2-heading">
-          <p>
-            <Link to={`/teams/${teamId}`}>团队项目</Link> / 项目
-          </p>
+          <RouteBreadcrumb parentPath={`/teams/${teamId}`}>
+            <Link to="/teams">我的团队</Link> / <Link to={`/teams/${teamId}`}>团队</Link> /{' '}
+            <span aria-current="page">项目</span>
+          </RouteBreadcrumb>
         </div>
         <Card className="v2-panel">
           <div className="v2-project-bar">
             <h1>{project?.name ?? '正在加载项目…'}</h1>
             {project ? (
               <div className="v2-actions">
-                <span ref={setExportTarget} />
-                <Tooltip title="重命名">
+                <Tooltip title="编辑">
                   <Button
                     htmlType="button"
                     type="text"
                     icon={<EditOutlined style={{ fontSize: 20 }} />}
-                    aria-label="重命名"
+                    aria-label="编辑"
                     disabled={task.busy}
-                    onClick={async () => {
-                      const name = await dialogs.prompt('新的项目名称', project.name)
-                      if (name && name !== project.name)
-                        void runProject(async () => {
-                          const next = await teams.updateTeamProject(teamId, project, name)
-                          setProject({ ...project, ...next })
-                        }, '项目已重命名。')
+                    onClick={() => {
+                      setEditingProject(true)
                     }}
                   />
                 </Tooltip>
@@ -1256,6 +1490,7 @@ function ProjectPage() {
                     }}
                   />
                 </Tooltip>
+                <span ref={setExportTarget} />
                 <Tooltip title="删除">
                   <Button
                     danger
@@ -1297,6 +1532,9 @@ function ProjectPage() {
               </div>
             ) : null}
           </div>
+          {project ? (
+            <p className="v2-project-description">{project.description || '暂无描述'}</p>
+          ) : null}
         </Card>
         {project && user ? (
           <Suspense
@@ -1314,6 +1552,20 @@ function ProjectPage() {
               exportTarget={exportTarget}
             />
           </Suspense>
+        ) : null}
+        {editingProject && project ? (
+          <ProjectEditDialog
+            project={project}
+            busy={task.busy}
+            onCancel={() => setEditingProject(false)}
+            onSave={(name, description) => {
+              void runProject(async () => {
+                const next = await teams.updateTeamProject(teamId, project, name, description)
+                setProject({ ...project, ...next })
+                setEditingProject(false)
+              }, '项目已更新。')
+            }}
+          />
         ) : null}
         {dialogs.holder}
       </section>

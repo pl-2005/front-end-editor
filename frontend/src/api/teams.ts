@@ -131,8 +131,10 @@ export const decideJoin = (teamId: number, requestId: number, decision: 'approve
 export const lookupInvitee = (teamId: number, identifier: string) =>
   request<Invitee>(`${base(teamId)}/invitees/lookup?identifier=${encodeURIComponent(identifier)}`)
 /** 按用户名或邮箱关键词模糊搜索可邀请用户，最多返回 20 条。 */
-export const searchInvitees = (teamId: number, query: string) =>
-  request<Invitee[]>(`${base(teamId)}/invitees/search?query=${encodeURIComponent(query)}`)
+export const searchInvitees = (teamId: number, query: string, signal?: AbortSignal) =>
+  request<Invitee[]>(`${base(teamId)}/invitees/search?query=${encodeURIComponent(query)}`, {
+    signal,
+  })
 /**
  * 由所有者向指定用户 ID 发送站内邀请。
  *
@@ -226,11 +228,16 @@ export const transferOwner = (teamId: number, userId: number) =>
  *
  * @param teamId 团队 ID
  * @param name 名称
+ * @param description 可选描述
  */
-export const createTeamProject = (teamId: number, name: string) =>
+export const createTeamProject = (
+  teamId: number,
+  name: string,
+  description: string | null = null,
+) =>
   request<TeamProjectSummary>(projects(teamId), {
     method: 'POST',
-    body: JSON.stringify({ name, template: 'vanilla', entry: '/index.html' }),
+    body: JSON.stringify({ name, description, template: 'vanilla', entry: '/index.html' }),
   })
 /**
  * 重试已预留项目的文档初始化，避免创建重复项目。
@@ -272,17 +279,23 @@ export const listTeamProjects = (teamId: number, signal?: AbortSignal) =>
 export const getTeamProject = (teamId: number, projectId: number, signal?: AbortSignal) =>
   request<TeamProjectDetails>(`${projects(teamId)}/${projectId}`, { signal })
 /**
- * 以元数据 stateVersion 构造 If-Match，提交项目名称及既有描述、模板。
+ * 以元数据 stateVersion 构造 If-Match，提交项目名称、描述及既有模板。
  *
  * @param teamId 团队 ID
  * @param project 项目实体或摘要
  * @param name 名称
+ * @param description 描述，默认保留既有值，null 表示清空
  */
-export const updateTeamProject = (teamId: number, project: TeamProjectSummary, name: string) =>
+export const updateTeamProject = (
+  teamId: number,
+  project: TeamProjectSummary,
+  name: string,
+  description: string | null = project.description,
+) =>
   request<TeamProjectSummary>(`${projects(teamId)}/${project.id}`, {
     method: 'PUT',
     headers: { 'If-Match': `"project-${project.id}-${project.stateVersion}"` },
-    body: JSON.stringify({ name, description: project.description, template: project.template }),
+    body: JSON.stringify({ name, description, template: project.template }),
   })
 /**
  * 携带元数据 If-Match 协调软删除；提交成功后清理该项目本地缓存。

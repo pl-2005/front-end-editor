@@ -1,9 +1,11 @@
-import { act, fireEvent, render as renderUI, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render as renderUI, screen, waitFor, within } from '@testing-library/react'
 import { ConfigProvider } from 'antd'
 import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearAuth, setCredentials } from './api/auth'
+import { exportTeamProject } from './collaboration/exportTeamProject'
+vi.mock('./collaboration/exportTeamProject', () => ({ exportTeamProject: vi.fn() }))
 vi.mock('./editor/v2/ProjectWorkspace', () => ({
   default: () => <section aria-label="项目协作工作区" />,
 }))
@@ -32,62 +34,225 @@ describe('V2 routes', () => {
     window.history.replaceState(null, '', '/')
   })
 
-  it('lets a member create a project without submitting browser files or a revision', async () => {
+  it('returns to parent routes on direct entry and disables the button at the top level', async () => {
+    window.history.replaceState(null, '', '/teams/9/projects/17')
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    const team = { id: 9, name: 'Team', description: null, joinPolicy: 'REQUEST' }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string) => {
+        if (path === '/api/teams?size=100') return Promise.resolve(ok({ content: [team] }))
+        if (path === '/api/teams/9') return Promise.resolve(ok(team))
+        if (path === '/api/teams/9/members')
+          return Promise.resolve(ok([{ userId: 4, username: 'member', role: 'MEMBER' }]))
+        if (path === '/api/teams/9/projects?size=100')
+          return Promise.resolve(ok({ items: [{ id: 17, name: 'Project' }], totalElements: 1 }))
+        if (path === '/api/teams/9/projects/17')
+          return Promise.resolve(ok({ id: 17, name: 'Project', collaboration: { generation: 1 } }))
+        throw new Error(`Unexpected request: ${path}`)
+      }),
+    )
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Project' })
+    expect(screen.getByRole('button', { name: '返回上一级' }).hasAttribute('disabled')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '返回上一级' }))
+    await screen.findByRole('heading', { name: 'Team' })
+    expect(window.location.pathname).toBe('/teams/9')
+    fireEvent.click(screen.getByRole('button', { name: '返回上一级' }))
+    await screen.findByRole('heading', { name: '我的团队' })
+    expect(window.location.pathname).toBe('/teams')
+    expect(screen.getByRole('button', { name: '返回上一级' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('manages projects from the table without triggering row navigation', async () => {
     window.history.replaceState(null, '', '/teams/9')
     setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
-    const project = {
+    let project = {
       id: 17,
-      name: 'New project',
-      description: null,
+      name: 'Original',
+      description: '描述',
       template: 'vanilla',
-      entry: '/index.html',
       stateVersion: 1,
-      createdAt: '2026-10-04T00:00:00Z',
-      updatedAt: '2026-10-04T00:00:00Z',
-      collaboration: {
-        collaborationMode: 'YJS',
-        epoch: 1,
-        generation: 1,
-        contentHash: 'hash',
-        size: 500,
-        contentType: 'application/octet-stream',
-      },
     }
+    let removed = false
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
-      if (path === '/api/teams/9')
-        return Promise.resolve(ok({ id: 9, name: 'Team', joinPolicy: 'REQUEST' }))
+      if (path === '/api/teams/9') return Promise.resolve(ok({ id: 9, name: 'Team' }))
       if (path === '/api/teams/9/members')
-        return Promise.resolve(
-          ok([{ userId: 4, username: 'member', displayName: 'Member', role: 'MEMBER' }]),
-        )
-      if (path === '/api/teams/9/projects' && init?.method === 'POST') {
-        expect(JSON.parse(String(init.body))).toEqual({
-          name: 'New project',
-          template: 'vanilla',
-          entry: '/index.html',
-        })
+        return Promise.resolve(ok([{ userId: 4, role: 'MEMBER' }]))
+      if (path === '/api/teams/9/projects?size=100')
+        return Promise.resolve(ok({ items: removed ? [] : [project] }))
+      if (path === '/api/teams/9/projects/17' && init?.method === 'PUT') {
+        expect(new Headers(init.headers).get('If-Match')).toBe('"project-17-1"')
+        project = { ...project, ...JSON.parse(String(init.body)), stateVersion: 2 }
         return Promise.resolve(ok(project))
       }
-      if (path === '/api/teams/9/projects?size=100')
-        return Promise.resolve(ok({ items: [], totalElements: 0 }))
-      if (path === '/api/teams/9/projects/17') return Promise.resolve(ok(project))
+      if (path === '/api/teams/9/projects/17/copy') {
+        expect(JSON.parse(String(init?.body))).toEqual({ name: 'Renamed 副本' })
+        return Promise.resolve(ok({ ...project, id: 18 }))
+      }
+      if (path === '/api/teams/9/projects/17' && init?.method === 'DELETE') {
+        expect(new Headers(init.headers).get('If-Match')).toBe('"project-17-2"')
+        removed = true
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
       throw new Error(`Unexpected request: ${path}`)
     })
     vi.stubGlobal('fetch', fetcher)
+    vi.mocked(exportTeamProject).mockResolvedValue(undefined)
     render(<App />)
-    await screen.findByRole('heading', { name: 'Team' })
-    fireEvent.change(screen.getByRole('textbox', { name: '项目名称' }), {
-      target: { value: 'New project' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
-    await screen.findByRole('heading', { name: 'New project' })
-    expect(screen.getByRole('button', { name: '删除' }).hasAttribute('disabled')).toBe(false)
+    const row = await screen.findByRole('row', { name: '查看项目 Original' })
     expect(
-      fetcher.mock.calls.every(
-        ([path]) => !path.includes('snapshot') && !path.includes('revision'),
-      ),
-    ).toBe(true)
+      within(row)
+        .getAllByRole('button', { hidden: true })
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual(['编辑', '复制项目', '导出项目', '删除'])
+    fireEvent.click(within(row).getByRole('button', { name: '编辑', hidden: true }))
+    expect(window.location.pathname).toBe('/teams/9')
+    fireEvent.change(screen.getByLabelText('项目名称'), {
+      target: { value: 'Renamed' },
+    })
+    fireEvent.change(screen.getByLabelText('项目描述'), {
+      target: { value: '新描述' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }))
+    await screen.findByRole('row', { name: '查看项目 Renamed', hidden: true })
+    expect(window.location.pathname).toBe('/teams/9')
+    fireEvent.click(screen.getByRole('button', { name: '复制项目', hidden: true }))
+    await screen.findByLabelText('副本名称', { selector: 'input' })
+    fireEvent.click(screen.getByRole('button', { name: '确定', hidden: true }))
+    await waitFor(() =>
+      expect(fetcher.mock.calls.some(([path]) => path.endsWith('/copy'))).toBe(true),
+    )
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: '导出项目', hidden: true }).hasAttribute('disabled'),
+      ).toBe(false),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '导出项目', hidden: true }))
+    await waitFor(() => expect(exportTeamProject).toHaveBeenCalledWith(9, 17, 4))
+    expect(window.location.pathname).toBe('/teams/9')
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: '删除', hidden: true }).hasAttribute('disabled'),
+      ).toBe(false),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '删除', hidden: true }))
+    fireEvent.click(await screen.findByRole('button', { name: '确定', hidden: true }))
+    await waitFor(() =>
+      expect(screen.queryByRole('row', { name: '查看项目 Renamed', hidden: true })).toBeNull(),
+    )
+    expect(window.location.pathname).toBe('/teams/9')
+  }, 20_000)
+
+  it.each(['click', 'keyboard'])('opens a project using a table row %s', async (method) => {
+    window.history.replaceState(null, '', '/teams/9')
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string) => {
+        if (path === '/api/teams/9') return Promise.resolve(ok({ id: 9, name: 'Team' }))
+        if (path === '/api/teams/9/members')
+          return Promise.resolve(ok([{ userId: 4, role: 'MEMBER' }]))
+        if (path === '/api/teams/9/projects?size=100')
+          return Promise.resolve(ok({ items: [{ id: 17, name: 'Project' }] }))
+        if (path === '/api/teams/9/projects/17')
+          return Promise.resolve(ok({ id: 17, name: 'Project', collaboration: { epoch: 1 } }))
+        throw new Error(`Unexpected request: ${path}`)
+      }),
+    )
+    render(<App />)
+    const row = await screen.findByRole('row', { name: '查看项目 Project' })
+    if (method === 'click') fireEvent.click(row)
+    else fireEvent.keyDown(row, { key: 'Enter' })
+    await screen.findByRole('heading', { name: 'Project' })
+    expect(window.location.pathname).toBe('/teams/9/projects/17')
   })
+
+  it.each([null, '项目用途\n第二行'])(
+    'creates a project with description %s',
+    async (description) => {
+      window.history.replaceState(null, '', '/teams/9')
+      setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+      const project = {
+        id: 17,
+        name: 'New project',
+        description,
+        template: 'vanilla',
+        entry: '/index.html',
+        stateVersion: 1,
+        createdAt: '2026-10-04T00:00:00Z',
+        updatedAt: '2026-10-04T00:00:00Z',
+        collaboration: {
+          collaborationMode: 'YJS',
+          epoch: 1,
+          generation: 1,
+          contentHash: 'hash',
+          size: 500,
+          contentType: 'application/octet-stream',
+        },
+      }
+      const fetcher = vi.fn((path: string, init?: RequestInit) => {
+        if (path === '/api/teams/9')
+          return Promise.resolve(ok({ id: 9, name: 'Team', joinPolicy: 'REQUEST' }))
+        if (path === '/api/teams/9/members')
+          return Promise.resolve(
+            ok([{ userId: 4, username: 'member', displayName: 'Member', role: 'MEMBER' }]),
+          )
+        if (path === '/api/teams/9/projects' && init?.method === 'POST') {
+          expect(JSON.parse(String(init.body))).toEqual({
+            name: 'New project',
+            description,
+            template: 'vanilla',
+            entry: '/index.html',
+          })
+          return Promise.resolve(ok(project))
+        }
+        if (path === '/api/teams/9/projects?size=100')
+          return Promise.resolve(ok({ items: [], totalElements: 0 }))
+        if (path === '/api/teams/9/projects/17') return Promise.resolve(ok(project))
+        throw new Error(`Unexpected request: ${path}`)
+      })
+      vi.stubGlobal('fetch', fetcher)
+      render(<App />)
+      await screen.findByRole('heading', { name: 'Team' })
+      const createButton = screen.getByRole('button', { name: '创建项目' })
+      expect(screen.queryByRole('textbox', { name: '项目名称' })).toBeNull()
+      fireEvent.mouseEnter(createButton)
+      expect(screen.queryByRole('textbox', { name: '项目名称' })).toBeNull()
+      fireEvent.click(createButton)
+      await screen.findByRole('dialog', { name: '创建项目' })
+      const nameInput = screen.getByRole('textbox', { name: '项目名称' })
+      fireEvent.change(nameInput, { target: { value: 'Draft' } })
+      fireEvent.click(screen.getByRole('button', { name: '取消' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+      expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+      fireEvent.click(createButton)
+      const reopenedInput = await screen.findByRole('textbox', { name: '项目名称' })
+      expect((reopenedInput as HTMLInputElement).value).toBe('')
+      fireEvent.change(reopenedInput, { target: { value: '   ' } })
+      fireEvent.click(screen.getByRole('button', { name: '创建' }))
+      expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+      fireEvent.change(reopenedInput, {
+        target: { value: ' New project ' },
+      })
+      if (description) {
+        const descriptionInput = screen.getByRole('textbox', { name: '项目描述' })
+        expect(descriptionInput.getAttribute('maxlength')).toBe('500')
+        fireEvent.change(descriptionInput, { target: { value: ` ${description} ` } })
+      }
+      fireEvent.click(screen.getByRole('button', { name: '创建' }))
+      await screen.findByRole('heading', { name: 'New project' })
+      expect(
+        screen.getByText(description || '暂无描述', { normalizer: (value) => value }),
+      ).toBeTruthy()
+      expect(screen.getByRole('button', { name: '删除' }).hasAttribute('disabled')).toBe(false)
+      expect(
+        fetcher.mock.calls.every(
+          ([path]) => !path.includes('snapshot') && !path.includes('revision'),
+        ),
+      ).toBe(true)
+    },
+  )
 
   it('retries the reserved project after initialization fails', async () => {
     window.history.replaceState(null, '', '/teams/9')
@@ -124,16 +289,17 @@ describe('V2 routes', () => {
     vi.stubGlobal('fetch', fetcher)
     render(<App />)
     await screen.findByRole('heading', { name: 'Team' })
+    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
     fireEvent.change(screen.getByRole('textbox', { name: '项目名称' }), {
       target: { value: 'Retry project' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
     fireEvent.click(await screen.findByRole('button', { name: '重试项目初始化' }))
     await screen.findByRole('heading', { name: 'Retry project' })
     expect(fetcher.mock.calls.filter(([path]) => path === '/api/teams/9/projects')).toHaveLength(1)
   })
 
-  it('only renames a project after a valid name is confirmed in the dialog', async () => {
+  it('saves name and description together through the edit icon after validating the name', async () => {
     window.history.replaceState(null, '', '/teams/9/projects/17')
     setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
     const project = {
@@ -146,7 +312,9 @@ describe('V2 routes', () => {
     }
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
       if (path === '/api/teams/9/projects/17' && init?.method === 'PUT') {
-        return Promise.resolve(ok({ ...project, name: 'Renamed', stateVersion: 2 }))
+        return Promise.resolve(
+          ok({ ...project, name: 'Renamed', description: '更新的描述', stateVersion: 2 }),
+        )
       }
       if (path === '/api/teams/9/projects/17') return Promise.resolve(ok(project))
       throw new Error(`Unexpected request: ${path}`)
@@ -154,24 +322,90 @@ describe('V2 routes', () => {
     vi.stubGlobal('fetch', fetcher)
     render(<App />)
     await screen.findByRole('heading', { name: 'Original' })
-    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
+    expect(screen.queryByRole('button', { name: '重命名' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '编辑描述' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: '编辑' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     fireEvent.click(await screen.findByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
-    fireEvent.change(await screen.findByRole('textbox', { name: '新的项目名称' }), {
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '项目名称' }), {
       target: { value: '   ' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '确定' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
-    fireEvent.change(screen.getByRole('textbox', { name: '新的项目名称' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '项目名称' }), {
       target: { value: ' Renamed ' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '确定' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '项目描述' }), {
+      target: { value: ' 更新的描述 ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
     await screen.findByRole('heading', { name: 'Renamed' })
     const update = fetcher.mock.calls.find(([, init]) => init?.method === 'PUT')![1]!
-    expect(JSON.parse(String(update.body)).name).toBe('Renamed')
+    expect(JSON.parse(String(update.body))).toEqual({
+      name: 'Renamed',
+      description: '更新的描述',
+      template: 'vanilla',
+    })
+    expect(screen.getByText('更新的描述')).toBeTruthy()
     expect(new Headers(update.headers).get('If-Match')).toBe('"project-17-1"')
+  })
+
+  it('edits and clears descriptions while preserving project metadata and using the latest version', async () => {
+    window.history.replaceState(null, '', '/teams/9/projects/17')
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    let project = {
+      id: 17,
+      name: 'Original',
+      description: '已有描述' as string | null,
+      template: 'vanilla',
+      stateVersion: 1,
+      collaboration: { epoch: 1, generation: 1 },
+    }
+    const fetcher = vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/api/teams/9/projects/17' && init?.method === 'PUT') {
+        const metadata = JSON.parse(String(init.body))
+        expect(metadata.name).toBe('Original')
+        expect(metadata.template).toBe('vanilla')
+        expect(new Headers(init.headers).get('If-Match')).toBe(
+          `"project-17-${project.stateVersion}"`,
+        )
+        project = { ...project, ...metadata, stateVersion: project.stateVersion + 1 }
+        return Promise.resolve(ok(project))
+      }
+      if (path === '/api/teams/9/projects/17') return Promise.resolve(ok(project))
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Original' })
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    const input = await screen.findByRole('textbox', { name: '项目描述' })
+    expect((input as HTMLTextAreaElement).value).toBe('已有描述')
+    expect(input.getAttribute('maxlength')).toBe('500')
+    fireEvent.change(input, { target: { value: '取消的修改' } })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '项目描述' }), {
+      target: { value: ' 新描述\n第二行 ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(project.description).toBe('新描述\n第二行')
+    expect(screen.getByText('新描述 第二行')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '项目描述' }), {
+      target: { value: '   ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(project.description).toBeNull()
+    expect(screen.getByText('暂无描述')).toBeTruthy()
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(2)
   })
 
   it('returns to login after registration without logging in', async () => {
@@ -373,7 +607,6 @@ describe('V2 routes', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '用户名或邮箱' }), {
       target: { value: 'ali' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '查找用户' }))
     await screen.findByText('已找到：Alice（@alice）')
     expect(screen.getByText('已找到：Alina（@alina）')).toBeTruthy()
     expect(
@@ -388,6 +621,63 @@ describe('V2 routes', () => {
         ([path, init]) => path === '/api/teams/9/invitations' && init?.method === 'POST',
       ),
     ).toHaveLength(1)
+  })
+
+  it('debounces invitation searches, ignores stale replies and clears the results', async () => {
+    window.history.replaceState(null, '', '/teams/9')
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    let resolveOldSearch!: (response: Response) => void
+    const oldSearch = new Promise<Response>((resolve) => {
+      resolveOldSearch = resolve
+    })
+    const fetcher = vi.fn((path: string) => {
+      if (path === '/api/teams/9')
+        return Promise.resolve(ok({ id: 9, name: 'Team', joinPolicy: 'REQUEST' }))
+      if (path === '/api/teams/9/members')
+        return Promise.resolve(ok([{ userId: 4, username: 'member', role: 'OWNER' }]))
+      if (path === '/api/teams/9/projects?size=100')
+        return Promise.resolve(ok({ items: [], totalElements: 0 }))
+      if (path === '/api/teams/9/join-requests') return Promise.resolve(ok([]))
+      if (path === '/api/teams/9/invitations')
+        return Promise.resolve(ok([{ id: 12, username: 'bob', status: 'PENDING' }]))
+      if (path === '/api/teams/9/invitees/search?query=al') return oldSearch
+      if (path === '/api/teams/9/invitees/search?query=ali')
+        return Promise.resolve(ok([{ userId: 8, username: 'alice', displayName: 'Alice' }]))
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const { container } = render(<App />)
+    await screen.findByRole('heading', { name: '邀请成员' })
+    const records = container.querySelector('details')!
+    expect(records.hasAttribute('open')).toBe(false)
+    fireEvent.click(screen.getByText('邀请记录（1）'))
+    expect(records.hasAttribute('open')).toBe(true)
+    expect(screen.getByRole('button', { name: '撤销' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '查找用户' })).toBeNull()
+    const input = screen.getByPlaceholderText('请输入用户名或邮箱')
+    const searches = () => fetcher.mock.calls.filter(([path]) => path.includes('/invitees/search'))
+    vi.useFakeTimers()
+    fireEvent.change(input, { target: { value: 'a' } })
+    await act(() => vi.advanceTimersByTimeAsync(200))
+    fireEvent.change(input, { target: { value: 'al' } })
+    await act(() => vi.advanceTimersByTimeAsync(299))
+    expect(searches()).toHaveLength(0)
+    await act(() => vi.advanceTimersByTimeAsync(1))
+    expect(searches()).toHaveLength(1)
+    fireEvent.change(input, { target: { value: 'ali' } })
+    await act(() => vi.advanceTimersByTimeAsync(300))
+    expect(screen.getByText('已找到：Alice（@alice）')).toBeTruthy()
+    await act(async () => {
+      resolveOldSearch(ok([{ userId: 10, username: 'alina', displayName: 'Alina' }]))
+      await oldSearch
+    })
+    expect(screen.queryByText('已找到：Alina（@alina）')).toBeNull()
+    fireEvent.click(container.querySelector('.ant-input-clear-icon')!)
+    expect((input as HTMLInputElement).value).toBe('')
+    expect(screen.queryByText('已找到：Alice（@alice）')).toBeNull()
+    await act(() => vi.advanceTimersByTimeAsync(300))
+    expect(searches()).toHaveLength(2)
+    vi.useRealTimers()
   })
 
   it('shows no-user feedback without sending an invitation', async () => {
@@ -419,7 +709,6 @@ describe('V2 routes', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '用户名或邮箱' }), {
       target: { value: 'absent@example.test' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '查找用户' }))
     await screen.findByText('没有找到可邀请的用户，请尝试其他关键词。')
     expect(screen.queryByRole('button', { name: '确认发送邀请' })).toBeNull()
     expect(window.location.pathname).toBe('/teams/9')
@@ -465,7 +754,6 @@ describe('V2 routes', () => {
       fireEvent.change(screen.getByRole('textbox', { name: '用户名或邮箱' }), {
         target: { value: 'alice' },
       })
-      fireEvent.click(screen.getByRole('button', { name: '查找用户' }))
       fireEvent.click(await screen.findByRole('button', { name: '确认发送邀请' }))
       expect((await screen.findByRole('alert')).textContent).toContain(reason)
       expect(screen.queryByText('内容已变化，请重新加载后再试。')).toBeNull()

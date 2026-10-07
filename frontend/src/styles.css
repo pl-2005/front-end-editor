@@ -48,7 +48,7 @@ body {
   align-items: center;
   gap: 30px;
   min-height: 68px;
-  padding: 12px max(24px, calc((100vw - 1120px) / 2));
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -99,9 +99,8 @@ body {
   cursor: pointer;
 }
 .v2-content {
-  max-width: 1168px;
   margin: auto;
-  padding: 32px 24px 80px;
+  padding: 16px 16px 24px;
 }
 .v2-section {
   display: grid;
@@ -124,12 +123,14 @@ body {
 .v2-heading a {
   color: var(--text-muted);
 }
-.v2-shell-wide .v2-topbar {
-  padding-inline: 16px;
+.v2-route-navigation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
-.v2-shell-wide .v2-content {
-  max-width: none;
-  padding: 16px 16px 24px;
+.v2-route-navigation > .ant-btn {
+  flex-shrink: 0;
 }
 .v2-project-section {
   gap: 12px;
@@ -160,6 +161,117 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
   gap: 16px;
+}
+.v2-team-management {
+  display: grid;
+  grid-template-columns: minmax(340px, 1fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 24px;
+}
+.v2-team-management-column {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.v2-team-management-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.v2-team-management-heading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.v2-team-management .v2-panel {
+  min-width: 0;
+}
+.v2-team-management .v2-panel h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+.v2-team-management .v2-list li {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.v2-team-detail-heading > div {
+  width: 100%;
+  min-width: 0;
+}
+.v2-team-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+.v2-team-title h1 {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.v2-team-policy {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding-inline-start: 16px;
+  border-inline-start: 1px solid var(--border);
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.v2-team-policy .ant-select {
+  min-width: 120px;
+}
+.v2-invite-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.v2-team-management .v2-invite-heading h3 {
+  flex-shrink: 0;
+  margin: 0;
+}
+.v2-invite-heading .ant-input-affix-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+.v2-team-project-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.v2-team-management .v2-team-project-heading h3 {
+  margin: 0;
+}
+.v2-project-description {
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.v2-project-table {
+  margin-top: 16px;
+}
+.v2-project-table-description {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.v2-invitation-records {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.v2-invitation-records summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+@media (max-width: 1000px) {
+  .v2-team-management {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .v2-card,
 .v2-panel {
@@ -293,9 +405,6 @@ body {
   .v2-account {
     width: 100%;
     justify-content: space-between;
-  }
-  .v2-content {
-    padding: 22px 16px 60px;
   }
   .v2-list li {
     align-items: flex-start;
@@ -768,7 +877,7 @@ button {
   height: max(900px, calc(100dvh - 220px));
 }
 @media (max-width: 575px) {
-  .v2-shell-wide .v2-content {
+  .v2-content {
     padding-inline: 8px;
   }
   .v2-workspace-grid[data-single-column='true'] {
