@@ -2,7 +2,7 @@
 
 一个面向 HTML、CSS 和 JavaScript 的浏览器在线编辑器。V2 使用 Spring Boot 管理身份、团队授权和项目元数据，Hocuspocus 网关负责 Yjs 协作与自动持久化，MySQL 保存当前文档指针，MinIO 保存 Y.Doc 二进制。项目工作区使用 Monaco 编辑 Y.Text，Sandpack 单向派生预览和控制台。
 
-> V2 已完成 Step09：身份认证、团队授权、Y.Doc 存储、安全网关、自动持久化及 Monaco/Yjs/Sandpack 工作区。支持多文件编辑、HTML/CSS/JS 补全与诊断、文本撤销重做、有界离线日志与重新授权后重发、Presence/远端光标及删除冲突恢复。项目软删除先 fence/持久化再关房；事务 Outbox 主动撤权并支持重试、幂等与故障对账。界面独立确认本地保存、连接同步与服务端持久化。启动、内部协议与本机验收见 [collaboration/README.md](collaboration/README.md)。票据与网关开关默认关闭，公开入口在 Step11 开放。完整进度见 [docs/V__2/README.md](docs/V__2/README.md)。
+> V2 已完成 Step01–11 的仓库交付及本机功能验收：身份/团队、Y.Doc 多人协作、Monaco/Sandpack、离线重连、删除/撤权、安全指标与恢复，以及可校验发布包和回滚说明。按用户要求仅本机运行，前端/REST/WebSocket 同源入口为 `http://127.0.0.1:15175`；在 `collaboration` 执行 `npm run start:local`。使用根 `.env` 的本机 MySQL/MinIO/Redis，不使用 Docker。启动器仅在本次进程开启协作，生产默认开关及外部入口保持关闭。详情见 [Step11 操作说明](docs/V__2/step11-release.md) 和 [完整进度](docs/V__2/README.md)。
 
 ## V1 功能记录
 

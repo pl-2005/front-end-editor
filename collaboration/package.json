@@ -13,6 +13,8 @@
     "build": "tsc",
     "start": "node scripts/start.mjs",
     "start:gateway": "node scripts/start-gateway.mjs",
+    "start:local": "node scripts/start-local.mjs",
+    "verify:step11": "node scripts/verify-step11-local.mjs --browser",
     "test": "npm run build && node --test test/*.test.mjs"
   },
   "dependencies": {

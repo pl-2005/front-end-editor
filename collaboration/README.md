@@ -1,10 +1,10 @@
-# Step05–06 协作文档与网关模块
+# 协作文档、网关与 V2 本机运行
 
 `src/document.ts` 是初始化服务和后续网关共用的 Y.Doc schema、编码、加载、复制与校验模块。文件用稳定 fileId 与 Y.Text 管理；支持 HTML/CSS/JS/JSON/TXT/Markdown。上限为 100 文件、单文件 1 MiB、正文合计 10 MiB、完整二进制 12 MiB；后续网关 Update 上限为 2 MiB。
 
 ## 本地启动
 
-需要 Node.js 24+、Java 21、本机 MySQL、MinIO 和 Redis。使用仓库根 `.env`，禁止 Docker。配置两个独立、至少 32 字节的随机密钥 `COLLAB_INITIALIZER_SECRET` 和 `COLLAB_STORAGE_SECRET`，不可打印或提交。初始化服务默认端口 8091，Spring 默认访问 `http://127.0.0.1:8091/internal/initialize`。只在开发或隔离环境设置 `COLLAB_CREATION_ENABLED=true`，生产公开入口仍等待 Step11。
+需要 Node.js 24+、Java 21、本机 MySQL、MinIO 和 Redis。使用仓库根 `.env`，禁止 Docker。配置两个独立、至少 32 字节的随机密钥 `COLLAB_INITIALIZER_SECRET` 和 `COLLAB_STORAGE_SECRET`，不可打印或提交。初始化服务默认端口 8091，Spring 默认访问 `http://127.0.0.1:8091/internal/initialize`。只在开发或隔离环境设置 `COLLAB_CREATION_ENABLED=true`；Step11 本次按用户要求仅本机运行，生产公开入口保持关闭。
 
 ```powershell
 cd collaboration
@@ -220,3 +220,8 @@ node scripts/verify-step10-local.mjs --browser
 ```
 
 验收脚本保留验收账号、项目和受限备份目录，关闭自己启动的进程和标签页，不修改根 `.env` 或打印凭据。生产公开入口继续等待 Step11。
+# Step11 本机完整 V2
+
+Step11 已交付发布包/校验、同源路由、回滚说明及完整本机验收。先在仓库根运行 `./collaboration/scripts/build-step11.ps1`；在本目录运行 `npm run verify:step11`（需要 web-access CDP proxy），再执行 `npm run start:local`，打开 `http://127.0.0.1:15175`。
+
+启动器读取仓库根 `.env` 的本机 MySQL/MinIO/Redis 和 JWT/HMAC 配置，使用构建后的静态前端。内部端口只绑定 loopback，内部路径在入口阻断；不会改写根 `.env`。本机运行与验收使用同一组端口，不能并行启动。正常停止先 flush 网关，失败时保持依赖进程并重试。完整发布/回滚/备份/监控及本机使用见 [Step11 操作说明](../docs/V__2/step11-release.md)。生产部署不在本次用户指定范围内。
