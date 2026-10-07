@@ -64,7 +64,7 @@ export class SpringApi implements StorageApi {
     const bytes = Buffer.concat(chunks)
     if (!response.ok) {
       let code = 'COLLAB_INTERNAL_FAILED'
-      try { code = JSON.parse(bytes.toString()).code ?? code } catch {}
+      try { const supplied = JSON.parse(bytes.toString()).code; if (typeof supplied === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(supplied)) code = supplied } catch {}
       throw new InternalFailure(code, response.status)
     }
     return binary && method === 'GET' ? new Uint8Array(bytes) : JSON.parse(bytes.toString())

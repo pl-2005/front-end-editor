@@ -77,7 +77,7 @@ public class HttpCollabInitializer implements CollabInitializer {
                 CollabPersistenceService.validateBytes(bytes);
                 if (!response.headers().firstValue("X-Collab-Content-Hash").orElse("").equals(CollabPersistenceService.hash(bytes))
                         || !response.headers().firstValue("Content-Length").orElse("").equals(Integer.toString(bytes.length))
-                        || !response.headers().firstValue("X-Collab-Epoch").orElse("").equals("1")
+                        || !response.headers().firstValue("X-Collab-Epoch").orElse("").equals(input.get("epoch").toString())
                         || !response.headers().firstValue("X-Collab-Project-Id").orElse("").equals(input.get("projectId").toString()))
                     throw new CollabFailure(503, "COLLAB_INITIALIZER_INVALID_RESPONSE");
                 return bytes;
@@ -85,5 +85,9 @@ public class HttpCollabInitializer implements CollabInitializer {
         } catch (CollabFailure e) { throw e; }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new CollabFailure(503, "COLLAB_INITIALIZER_UNAVAILABLE"); }
         catch (Exception e) { throw new CollabFailure(503, "COLLAB_INITIALIZER_UNAVAILABLE"); }
+    }
+    public byte[] rebuild(CollabPointer source, long epoch, byte[] bytes) {
+        return call(Map.of("projectId", source.projectId(), "epoch", epoch, "source",
+                Map.of("projectId", source.projectId(), "epoch", source.epoch(), "bytes", Base64.getEncoder().encodeToString(bytes))));
     }
 }

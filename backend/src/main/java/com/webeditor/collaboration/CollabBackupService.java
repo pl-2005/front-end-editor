@@ -30,7 +30,7 @@ public class CollabBackupService {
      * @return 本次固定的文档指针，备份时须同时保留其二进制对象
      */
     public CollabPointer pinCurrent(long id, String backupId, Instant retainUntil) {
-        if (backupId == null || !backupId.matches("[A-Za-z0-9_-]{1,100}")) throw new CollabFailure(400, "COLLAB_INVALID_BACKUP_ID");
+        if (backupId == null || !backupId.matches("[A-Za-z0-9_-]{1,100}") || retainUntil == null) throw new CollabFailure(400, "COLLAB_INVALID_BACKUP_ID");
         return tx.execute(status -> {
             projects.findByIdForUpdate(id).orElseThrow(() -> new CollabFailure(404, "PROJECT_NOT_FOUND"));
             CollabPointer p = store.find(id).orElseThrow(CollabFailure::corrupt);

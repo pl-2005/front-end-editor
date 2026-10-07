@@ -186,7 +186,11 @@ export class CollaborationSession {
     } catch (error) {
       if (this.stopped || attempt !== this.attempt || controller.signal.aborted) return
       if (error instanceof ApiError && [401, 403, 404, 410].includes(error.status)) this.forbid()
-      else if (error instanceof ApiError && error.code === 'COLLAB_TICKETS_DISABLED') {
+      else if (error instanceof ApiError && ['COLLAB_PROJECT_FENCED', 'COLLAB_MAINTENANCE_REQUIRED'].includes(error.code ?? '')) {
+        this.paused = true
+        this.set({ connection: 'failed', synced: false, writable: false, error: '项目正在维护，编辑已暂停；本地未同步内容已保留' })
+        this.retry(attempt)
+      } else if (error instanceof ApiError && error.code === 'COLLAB_TICKETS_DISABLED') {
         this.set({ connection: 'failed', synced: false, writable: false, error: '协作编辑暂未开放：请开启本机票据与网关服务后刷新页面' })
       } else { this.set({ error: '连接失败，正在重试' }); this.retry(attempt) }
     }

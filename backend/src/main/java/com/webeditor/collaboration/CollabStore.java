@@ -120,8 +120,9 @@ public class CollabStore {
         ensureGuard(key);
         String state = jdbc.queryForObject("SELECT state FROM collab_object_guard WHERE object_key=? FOR UPDATE", String.class, key);
         if (!"LIVE".equals(state)) throw new CollabFailure(409, "COLLAB_OBJECT_RETIRED");
-        if (!retainUntil.isAfter(Instant.now())) throw new CollabFailure(400, "COLLAB_INVALID_BACKUP_WINDOW");
-        jdbc.update("INSERT INTO collab_backup_reference(backup_id, object_key, retain_until) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE retain_until=?",
+        if (retainUntil == null || !retainUntil.isAfter(Instant.now()) || retainUntil.isAfter(Instant.now().plus(Duration.ofDays(3650))))
+            throw new CollabFailure(400, "COLLAB_INVALID_BACKUP_WINDOW");
+        jdbc.update("INSERT INTO collab_backup_reference(backup_id, object_key, retain_until) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE retain_until=GREATEST(retain_until, ?)",
                 backupId, key, ts(retainUntil), ts(retainUntil));
     }
     /**
@@ -133,6 +134,7 @@ public class CollabStore {
      */
     public boolean referenced(String key, Instant now) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM collab_document WHERE object_key=?", Long.class, key) > 0
+                || jdbc.queryForObject("SELECT COUNT(*) FROM collab_recovery WHERE state<>'COMMITTED' AND (source_object_key=? OR target_object_key=?)", Long.class, key, key) > 0
                 || jdbc.queryForObject("SELECT COUNT(*) FROM collab_backup_reference WHERE object_key=? AND retain_until>?", Long.class, key, ts(now)) > 0;
     }
     // First observation quarantines; a later pass rechecks under the same upload guard.
@@ -165,6 +167,10 @@ public class CollabStore {
      */
     public void deleted(String key) { jdbc.update("UPDATE collab_object_guard SET state='DELETED' WHERE object_key=? AND state='DELETING'", key); }
     private record Guard(String state, Instant leaseUntil, Instant unreferencedSince) {}
+    public void requireRecovered(long id) {
+        if (jdbc.queryForObject("SELECT COUNT(*) FROM collab_recovery WHERE project_id=? AND state<>'COMMITTED'", Long.class, id) > 0)
+            throw new CollabFailure(503, "COLLAB_PROJECT_FENCED");
+    }
     /**
      * 以 FOR UPDATE 锁读取对象保护状态、租约和孤儿观察时间。
      *

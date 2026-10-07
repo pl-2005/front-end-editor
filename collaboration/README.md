@@ -24,7 +24,7 @@ npm start
 | POST | `/api/teams/{teamId}/projects/{id}/copy` | 从当前持久化指针复制并生成新身份 |
 | GET | `/api/teams/{teamId}/projects/{id}` | 项目元数据及 collaboration 描述，无 V1 version/files/objectKey |
 
-创建正文为 `{ "name": "项目名", "template": "vanilla", "entry": "/index.html" }`；复制正文为 `{ "name": "副本名" }`。所有有效成员同权；失败返回 `COLLAB_INITIALIZATION_FAILED` 和 `X-Initializing-Project`，前端据此重试同一个保留 ID。INITIALIZING 项目不出现在列表或详情中，复制初始化失败重试时重新读取源项目当前持久化状态，不能改用模板。删除固定返回 `COLLAB_DELETE_COORDINATION_REQUIRED`，等待 Step09。
+创建正文为 `{ "name": "项目名", "template": "vanilla", "entry": "/index.html" }`；复制正文为 `{ "name": "副本名" }`。所有有效成员同权；失败返回 `COLLAB_INITIALIZATION_FAILED` 和 `X-Initializing-Project`，前端据此重试同一个保留 ID。INITIALIZING 项目不出现在列表或详情中，复制初始化失败重试时重新读取源项目当前持久化状态，不能改用模板。删除通过 Step09 durable fence/Outbox 协调，见下节协议。
 
 ## 内部存储协议
 
@@ -57,7 +57,7 @@ SHA256(BODY)
 
 清理器只扫描规范的 `collab/` 对象，先检查对象年龄，再记录首次无引用观察；间隔至少 `max(COLLAB_RECOVERY_WINDOW, COLLAB_CONFIRMATION_WINDOW)` 后，在同一个 guard 下再次检查当前指针、租约和有效备份引用，然后标记 DELETING，事务外删除，最后标记 DELETED。DELETING/DELETED 对象不能被新上传或备份重新认领。默认恢复窗口 30 天，确认窗口 24 小时。
 
-备份工具应通过 `CollabBackupService.pinCurrent` 在复制对象前登记保护引用，并同时保留匹配的 MySQL 元数据和所有被引用的 Y.Doc 二进制。仅备份数据库不足以恢复文件。备份工具的完整编排留给 Step10；V1 清理器继续只扫描 `projects/`。
+备份工具通过 `CollabBackupService.pinCurrent` 在复制对象前登记保护引用，并同时保留匹配的 MySQL 元数据和所有被引用的 Y.Doc 二进制。仅备份数据库不足以恢复文件。Step10 联合备份工具与失败对账见 [运维说明](../docs/V__2/step10-operations.md)；V1 清理器继续只扫描 `projects/`。
 
 ## 验证
 
@@ -204,3 +204,19 @@ node scripts/verify-step09-local.mjs
 ```
 
 脚本使用根 `.env` 的本机 MySQL/MinIO/Redis，在 loopback 18089/18094/18095 启动临时 Spring、网关及初始化服务。验证编辑中 durable 删除、无活动房间删除、重复删除、旧票据拒绝、MinIO 最后对象保留、四类 Outbox 主动撤权、其他成员继续编辑及网关重启恢复。MinIO 签名读取仅由验收脚本使用本机配置，网关没有 MinIO 凭据。结束后关闭临时进程，验收账号及项目保留；不使用 Docker，不修改根 `.env`，不打印或落盘身份/内部凭据。生产协作入口仍等待 Step11。
+
+## Step10 安全、指标与当前文件恢复
+
+V13 新增持续恢复 fence 和幂等回执；恢复仅在关闭创建/票据/网关的维护模式执行，重建当前内容到新 epoch 的 generation 1 对象后原子切换指针。缺失、损坏、上传和数据库失败不会覆盖当前指针或解开项目 fence。运维路由使用独立 maintenance HMAC 权限，普通 JWT 和网关密钥不能访问。
+
+`scripts/maintenance.mjs` 提供脱敏指标、MySQL/MinIO 联合备份、单项目恢复及全活动项目恢复；默认只访问 loopback 并加载根 `.env`。备份保护当前/软删除对象，dump 后复核指针；清理排除上传租约、有效备份及未解决恢复的源/目标对象。详细配置、容量、协议、命令和失败对账见 [Step10 运维说明](../docs/V__2/step10-operations.md)。
+
+```powershell
+# 后端先构建到 .codex-build/step10-backend；使用本机服务，禁止 Docker。
+npm test
+node scripts/verify-step10-local.mjs
+# 可选真实浏览器预览 sandbox/no-referrer 检查，需要已连接的 web-access CDP proxy。
+node scripts/verify-step10-local.mjs --browser
+```
+
+验收脚本保留验收账号、项目和受限备份目录，关闭自己启动的进程和标签页，不修改根 `.env` 或打印凭据。生产公开入口继续等待 Step11。

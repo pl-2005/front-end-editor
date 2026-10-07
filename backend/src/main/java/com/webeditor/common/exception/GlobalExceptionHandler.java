@@ -27,6 +27,8 @@ import org.springframework.data.redis.RedisConnectionFailureException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private final com.webeditor.collaboration.CollabMetrics metrics;
+    public GlobalExceptionHandler(com.webeditor.collaboration.CollabMetrics metrics) { this.metrics = metrics; }
 
     /**
      * 转换协作故障为对应状态响应；初始化失败时通过响应头保留可重试项目 ID。
@@ -62,6 +64,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(RedisConnectionFailureException.class)
     ResponseEntity<ApiError> handleRedisFailure(HttpServletRequest request) {
+        metrics.increment(com.webeditor.collaboration.CollabMetrics.Name.REDIS_FAILURE);
         return ResponseEntity.status(503).body(ApiError.of(503, "AUTH_SERVICE_UNAVAILABLE",
                 "认证服务暂时不可用", request.getRequestURI()));
     }
@@ -267,7 +270,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(StorageException.class)
     ResponseEntity<ApiError> handleStorageFailure(StorageException exception, HttpServletRequest request) {
-        log.error("Snapshot storage failure", exception);
+        log.error("STORAGE_UNAVAILABLE requestId={}", request.getAttribute("requestId"));
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ApiError.of(503, "STORAGE_UNAVAILABLE",
                 "项目存储暂时不可用", request.getRequestURI()));
     }
@@ -280,7 +283,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiError> handleUnexpected(Exception exception, HttpServletRequest request) {
-        log.error("Unhandled request failure", exception);
+        log.error("INTERNAL_ERROR requestId={}", request.getAttribute("requestId"));
         return ResponseEntity.internalServerError().body(ApiError.of(500, "INTERNAL_ERROR",
                 "服务暂时不可用", request.getRequestURI()));
     }

@@ -18,6 +18,10 @@ import com.webeditor.identity.application.AuthService;
 
 @Configuration
 public class SecurityConfig {
+    @Bean FilterRegistrationBean<com.webeditor.collaboration.CollabMaintenanceAuthenticationFilter> maintenanceRegistration(
+            com.webeditor.collaboration.CollabMaintenanceAuthenticationFilter filter) {
+        var registration = new FilterRegistrationBean<>(filter); registration.setEnabled(false); return registration;
+    }
     /**
      * 禁用 JWT 过滤器的 Servlet 自动注册，使其只在安全过滤链中执行。
      *
@@ -67,7 +71,8 @@ public class SecurityConfig {
      * @param errors 统一认证错误写入器
      */
     @Bean SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwt,
-            JsonAuthenticationFilter json, SecurityErrors errors) throws Exception {
+            JsonAuthenticationFilter json, SecurityErrors errors,
+            com.webeditor.collaboration.CollabMaintenanceAuthenticationFilter maintenance) throws Exception {
         http.csrf(csrf -> csrf.disable()).cors(cors -> cors.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(form -> form.disable()).httpBasic(basic -> basic.disable())
@@ -78,6 +83,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/health", "/api/health/readiness", "/api/teams/discover").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
+                        .requestMatchers("/internal/collaboration/maintenance/**", "/internal/collaboration/metrics")
+                            .hasAuthority("COLLAB_MAINTENANCE")
                         // The internal controller authenticates bounded raw bodies with its separate HMAC key.
                         .requestMatchers(HttpMethod.GET, "/internal/collaboration/operations/*").permitAll()
                         .requestMatchers("/internal/collaboration/projects/**", "/internal/collaboration/tickets/consume",
@@ -85,6 +92,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/projects/*/collab-ticket").authenticated()
                         .requestMatchers("/api/projects", "/api/projects/**").denyAll()
                         .requestMatchers("/api/**").authenticated().anyRequest().denyAll())
+                .addFilterBefore(maintenance, AnonymousAuthenticationFilter.class)
                 .addFilterBefore(jwt, AnonymousAuthenticationFilter.class)
                 .addFilterBefore(json, AnonymousAuthenticationFilter.class);
         return http.build();

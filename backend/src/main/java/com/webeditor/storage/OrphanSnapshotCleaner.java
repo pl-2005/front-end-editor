@@ -68,7 +68,7 @@ public class OrphanSnapshotCleaner {
                 storage.delete(object.key());
                 removed++;
             } catch (StorageException exception) {
-                log.warn("Could not remove orphaned snapshot object {}", object.key(), exception);
+                log.warn("LEGACY_CLEANUP_FAILED");
             }
         }
         if (removed > 0) {

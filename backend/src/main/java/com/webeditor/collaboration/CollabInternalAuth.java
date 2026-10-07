@@ -20,19 +20,23 @@ public class CollabInternalAuth {
         this.jdbc = jdbc; this.secret = secret;
     }
     public byte[] authenticate(HttpServletRequest request) throws IOException {
+        return authenticate(request, secret, "storage", CollabPointer.MAX_BYTES);
+    }
+    public byte[] authenticate(HttpServletRequest request, String key, String audience, int limit) throws IOException {
         String timestamp = request.getHeader("X-Collab-Timestamp"), nonce = request.getHeader("X-Collab-Nonce");
         Instant now = Instant.now();
-        if (secret.getBytes(StandardCharsets.UTF_8).length < 32 || request.getQueryString() != null
+        if (key.getBytes(StandardCharsets.UTF_8).length < 32 || request.getQueryString() != null
                 || timestamp == null || !timestamp.matches("[0-9]{10}")
                 || nonce == null || !nonce.matches("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}")
                 || Math.abs(now.getEpochSecond() - Long.parseLong(timestamp)) > 30) throw unauthorized();
-        byte[] body = request.getInputStream().readNBytes(CollabPointer.MAX_BYTES + 1);
-        if (body.length > CollabPointer.MAX_BYTES) throw new CollabFailure(413, "COLLAB_DOCUMENT_TOO_LARGE");
-        if (!InternalHmac.matches(request.getHeader("X-Collab-Signature"), InternalHmac.sign(secret,
-                request.getMethod(), request.getRequestURI(), "storage", timestamp, nonce, body))) throw unauthorized();
+        byte[] body = request.getInputStream().readNBytes(limit + 1);
+        if (body.length > limit) throw new CollabFailure(413, "COLLAB_DOCUMENT_TOO_LARGE");
+        if (!InternalHmac.matches(request.getHeader("X-Collab-Signature"), InternalHmac.sign(key,
+                request.getMethod(), request.getRequestURI(), audience, timestamp, nonce, body))) throw unauthorized();
         try {
-            jdbc.update("INSERT INTO collab_hmac_nonce(audience, nonce, expires_at) VALUES ('storage', ?, ?)",
-                    nonce, Timestamp.from(now.plusSeconds(61)));
+            jdbc.update("DELETE FROM collab_hmac_nonce WHERE expires_at < ?", Timestamp.from(now));
+            jdbc.update("INSERT INTO collab_hmac_nonce(audience, nonce, expires_at) VALUES (?, ?, ?)",
+                    audience, nonce, Timestamp.from(now.plusSeconds(61)));
         } catch (DuplicateKeyException e) { throw unauthorized(); }
         return body;
     }

@@ -30,6 +30,18 @@ it('retains its local log and pauses editing on a temporary project fence', asyn
   expect(session.doc.getMap('meta').get('projectId')).toBe(7)
   expect((await indexedDB.databases()).map(db => db.name)).toContain(cacheName(101, { projectId: 7, epoch: 1 }))
 })
+it.each(['COLLAB_PROJECT_FENCED', 'COLLAB_MAINTENANCE_REQUIRED'])('pauses previously authorized offline editing when ticket renewal reports %s', async code => {
+  const { session, callbacks } = await connected()
+  await session.flushLocal()
+  callbacks.onClose({ event: { code: 1006 } })
+  expect(session.state.writable).toBe(true)
+  mocks.ticket.mockRejectedValue(new ApiError('maintenance', 503, code))
+  await session.connect()
+  expect(session.state.writable).toBe(false)
+  expect(session.state.error).toContain('维护')
+  expect(session.doc.getMap('files').size).toBe(1)
+  expect((await indexedDB.databases()).map(db => db.name)).toContain(cacheName(101, { projectId: 7, epoch: 1 }))
+})
 
 it('clears content and the local log on a Hocuspocus document revocation frame', async () => {
   const { session, callbacks } = await connected()

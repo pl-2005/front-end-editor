@@ -12,7 +12,7 @@ const runtime = vi.hoisted(() => {
 })
 vi.mock('@codesandbox/sandpack-react', () => ({
   SandpackProvider: ({ children }: { children: ReactNode }) => children,
-  SandpackPreview: () => <div>Preview</div>, SandpackConsole: () => <div>Console</div>,
+  SandpackPreview: () => <iframe title="Sandpack Preview" />, SandpackConsole: () => <div>Console</div>,
   useSandpack: () => ({ sandpack: runtime, dispatch: runtime.dispatch,
     listen: (listener: typeof runtime.listener) => { runtime.listener = listener; return runtime.unsubscribe } }),
 }))
@@ -27,6 +27,18 @@ function fixture() {
 }
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); Object.keys(runtime.files).forEach(k => delete runtime.files[k]) })
 describe('Sandpack document projection lifecycle', () => {
+  it('restricts preview navigation and referrer disclosure, including dynamically added runtime frames', async () => {
+    const f = fixture(), view = render(<SandpackBridge session={f as unknown as CollaborationSession} entry="/index.html" structureKey="initial" />)
+    const frame = view.getByTitle('Sandpack Preview') as HTMLIFrameElement
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin allow-forms')
+    expect(frame.referrerPolicy).toBe('no-referrer')
+    const runtime = document.createElement('iframe')
+    await act(async () => { frame.parentElement!.append(runtime) })
+    expect(runtime.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    expect(runtime.getAttribute('sandbox')).not.toContain('allow-popups')
+    expect(runtime.referrerPolicy).toBe('no-referrer')
+    view.unmount(); f.doc.destroy()
+  })
   it('replays the latest document once after initialization and refreshes repaired HTML', () => {
     vi.useFakeTimers()
     const f = fixture(), view = render(<SandpackBridge session={f as unknown as CollaborationSession} entry="/index.html" structureKey="initial" />)

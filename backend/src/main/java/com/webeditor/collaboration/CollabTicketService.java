@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class CollabTicketService {
     private final JdbcTemplate jdbc;
     private final boolean enabled;
+    private final CollabStore store;
+    private final CollabMaintenanceMode maintenance;
     private final SecureRandom random = new SecureRandom();
     public record Ticket(String ticket, Instant expiresAt, long projectId, long epoch) {}
     public record Identity(long userId, String displayName, String avatarColor, long projectId,
@@ -29,13 +31,15 @@ public class CollabTicketService {
         JOIN app_user u ON u.id=m.user_id
         WHERE p.id=? AND u.id=? AND p.status=1 AND p.legacy_unowned=FALSE
         """;
-    public CollabTicketService(JdbcTemplate jdbc, @Value("${editor.collaboration.ticket-enabled:false}") boolean enabled) {
-        this.jdbc = jdbc; this.enabled = enabled;
+    public CollabTicketService(JdbcTemplate jdbc, @Value("${editor.collaboration.ticket-enabled:false}") boolean enabled,
+            CollabStore store, CollabMaintenanceMode maintenance) {
+        this.jdbc = jdbc; this.enabled = enabled; this.store = store; this.maintenance = maintenance;
     }
-    private void enabled() { if (!enabled) throw new CollabFailure(503, "COLLAB_TICKETS_DISABLED"); }
+    private void enabled() { maintenance.writable(); if (!enabled) throw new CollabFailure(503, "COLLAB_TICKETS_DISABLED"); }
     private State state(long projectId, long userId) {
         State state = jdbc.query(STATE, (rs, row) -> new State(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getString(4), rs.getString(5)),
                 projectId, userId).stream().findFirst().orElseThrow(() -> new CollabFailure(403, "COLLAB_FORBIDDEN"));
+        store.requireRecovered(projectId);
         if (jdbc.queryForObject("SELECT COUNT(*) FROM collab_operation WHERE project_id=? AND state='PREPARED'", Long.class, projectId) > 0)
             throw new CollabFailure(503, "COLLAB_PROJECT_FENCED");
         return state;

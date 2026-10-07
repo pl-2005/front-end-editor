@@ -148,6 +148,27 @@ test('authorization renewal failure closes connection within the five-second lea
   await new Promise(resolve => setTimeout(resolve, 50))
   assert.equal(room.dirtySequence, accepted)
 })
+test('metrics require signed internal authentication and report durable waterlines without content', async t => {
+  const f = await setup(t), client = await f.connect()
+  const marker = 'never-export-project-source'
+  client.doc.getMap('files').values().next().value.get('content').insert(0, marker)
+  await until(() => f.gateway.rooms.get('project:1:epoch:1').dirtySequence > 0)
+  const path = '/internal/collaboration/metrics', base = `http://127.0.0.1:${f.gateway.server.address.port}`
+  assert.equal((await fetch(base + path)).status, 401)
+  const read = async () => {
+    const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomUUID()
+    const response = await fetch(base + path, { headers: { 'X-Collab-Timestamp': timestamp, 'X-Collab-Nonce': nonce,
+      'X-Collab-Signature': signature(gatewaySecret, 'GET', path, 'gateway', timestamp, nonce, new Uint8Array()) } })
+    assert.equal(response.status, 200); return response.json()
+  }
+  const pending = await read()
+  assert.equal(pending.rooms, 1); assert.equal(pending.connections, 1)
+  assert.ok(pending.pendingBytes > 0); assert.equal(pending.documents[0].durableGap, 1)
+  await f.flush(); const saved = await read()
+  assert.equal(saved.pendingBytes, 0); assert.equal(saved.documents[0].durableGap, 0)
+  assert.equal(saved.documents[0].generation, 2); assert.equal(saved.counters.persist_success, 1)
+  assert.equal(JSON.stringify(saved).includes(marker), false)
+})
 
 test('delete fence flushes accepted updates, blocks further input and retries with the same token', async t => {
   const f = await setup(t), client = await f.connect(), operationId = randomUUID()

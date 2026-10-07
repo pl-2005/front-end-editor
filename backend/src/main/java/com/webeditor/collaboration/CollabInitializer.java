@@ -19,5 +19,6 @@ public interface CollabInitializer {
      * @param bytes 文档二进制内容
      */
     byte[] copy(long projectId, CollabPointer source, byte[] bytes);
+    byte[] rebuild(CollabPointer source, long epoch, byte[] bytes);
     record FileInput(String path, String code) {}
 }

@@ -6,6 +6,8 @@ spring:
     name: web-editor-backend
   data:
     redis:
+      timeout: 2s
+      connect-timeout: 2s
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
       username: ${SPRING_DATA_REDIS_USERNAME:}
@@ -28,6 +30,9 @@ editor:
     creation-enabled: ${COLLAB_CREATION_ENABLED:false}
     ticket-enabled: ${COLLAB_TICKET_ENABLED:false}
     storage-secret: ${COLLAB_STORAGE_SECRET:}
+    maintenance:
+      enabled: ${COLLAB_MAINTENANCE_ENABLED:false}
+      secret: ${COLLAB_MAINTENANCE_SECRET:}
     gateway:
       enabled: ${COLLAB_GATEWAY_ENABLED:false}
       url: ${COLLAB_GATEWAY_INTERNAL_URL:http://127.0.0.1:8092}

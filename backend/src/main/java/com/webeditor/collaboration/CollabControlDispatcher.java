@@ -17,9 +17,15 @@ public class CollabControlDispatcher {
     private final CollabGatewayClient gateway;
     private final CollabDeleteService operations;
     private final boolean enabled;
+    private final CollabMetrics metrics;
+    @org.springframework.beans.factory.annotation.Autowired
     public CollabControlDispatcher(JdbcTemplate jdbc, CollabGatewayClient gateway, CollabDeleteService operations,
-            @Value("${editor.collaboration.gateway.enabled:false}") boolean enabled) {
+            @Value("${editor.collaboration.gateway.enabled:false}") boolean enabled, CollabMetrics metrics) {
         this.jdbc = jdbc; this.gateway = gateway; this.operations = operations; this.enabled = enabled;
+        this.metrics = metrics;
+    }
+    public CollabControlDispatcher(JdbcTemplate jdbc, CollabGatewayClient gateway, CollabDeleteService operations, boolean enabled) {
+        this(jdbc, gateway, operations, enabled, new CollabMetrics());
     }
 
     @Scheduled(initialDelay = 1000, fixedDelay = 1000)
@@ -38,7 +44,9 @@ public class CollabControlDispatcher {
                 var now = Timestamp.from(Instant.now());
                 jdbc.update("UPDATE collab_control_event SET delivered_at=?, acknowledged_at=?, attempts=attempts+1 WHERE id=?",
                         now, now, event.id());
+                metrics.increment(CollabMetrics.Name.OUTBOX_ACK);
             } catch (RuntimeException failure) {
+                metrics.increment(CollabMetrics.Name.OUTBOX_FAILURE);
                 Integer attempts = jdbc.queryForObject("SELECT attempts FROM collab_control_event WHERE id=?", Integer.class, event.id());
                 long delay = Math.min(60, 1L << Math.min(attempts, 6));
                 jdbc.update("UPDATE collab_control_event SET attempts=attempts+1, next_attempt_at=? WHERE id=?",

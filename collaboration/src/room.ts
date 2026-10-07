@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { encodeDocument, fingerprint, loadDocument, normalizeConflicts, validateDocument, LIMITS, type Identity } from './document.js'
 import { hash } from './hmac.js'
 import { InternalFailure, type Pointer, type StorageApi } from './internal.js'
+import { Metrics } from './metrics.js'
 
 type Pending = { sequence: number; update: Uint8Array }
 type Attempt = { pointer: Pointer; key: string; bytes: Uint8Array; sequence: number; fingerprint: string }
@@ -30,7 +31,8 @@ export class Room {
   private durableHash: string
   readonly options: RoomOptions
   constructor(public doc: Y.Doc, public pointer: Pointer, private api: StorageApi,
-    private publish: (state: object) => void = () => {}, private closeConnections: () => void = () => {}, options: Partial<RoomOptions> = {}) {
+    private publish: (state: object) => void = () => {}, private closeConnections: () => void = () => {}, options: Partial<RoomOptions> = {},
+    private metrics = new Metrics()) {
     this.options = { ...defaults, ...options }
     this.acceptedHash = hash(Buffer.from(fingerprint(doc)))
     this.durableHash = this.acceptedHash
@@ -100,6 +102,7 @@ export class Room {
     return this.pointer
   }
   private async persistOnce(): Promise<void> {
+    const started = performance.now()
     try {
       // Snapshot and sequence captured in one synchronous turn. Later edits remain in pending.
       this.attempt ??= { pointer: { ...this.pointer }, key: randomUUID(), bytes: encodeDocument(this.doc, this.identity), sequence: this.dirtySequence, fingerprint: this.acceptedHash }
@@ -108,6 +111,7 @@ export class Room {
       try { saved = await this.api.persist(attempt.pointer, attempt.key, attempt.bytes) }
       catch (error) {
         if (!(error instanceof InternalFailure) || error.code !== 'COLLAB_GENERATION_CONFLICT') throw error
+        this.metrics.add('cas_conflict')
         await this.rebase()
         this.attempt = undefined
         if (++this.conflicts >= 3) { this.conflicts = 0; throw error }
@@ -118,6 +122,7 @@ export class Room {
         || saved.generation !== attempt.pointer.generation + 1 || saved.contentHash !== hash(attempt.bytes) || saved.size !== attempt.bytes.byteLength)
         throw new InternalFailure('COLLAB_PERSIST_RECEIPT_INVALID')
       this.pointer = saved; this.durableSequence = Math.max(this.durableSequence, attempt.sequence)
+      this.metrics.add('persist_success')
       this.durableHash = attempt.fingerprint
       this.pending = this.pending.filter(item => item.sequence > this.durableSequence)
       this.pendingBytes = this.pending.reduce((sum, item) => sum + item.update.byteLength, 0)
@@ -126,6 +131,7 @@ export class Room {
       this.publishState()
       if (this.pending.length) this.schedule()
     } catch (error) {
+      this.metrics.add('persist_failure')
       this.paused = true; this.clearSchedule()
       if (error instanceof InternalFailure && ['COLLAB_EPOCH_CONFLICT', 'PROJECT_NOT_FOUND'].includes(error.code)) {
         this.frozen = true; this.closeConnections()
@@ -134,7 +140,7 @@ export class Room {
         this.retry = setTimeout(() => { this.retry = undefined; this.backgroundFlush() }, Math.min(30000, 500 * 2 ** Math.min(this.failures++, 6)))
       }
       this.publishState(); throw error
-    }
+    } finally { this.metrics.add('persist_milliseconds', performance.now() - started) }
   }
   private async rebase(): Promise<void> {
     this.paused = true

@@ -12,6 +12,8 @@ public class CollabPersistenceService {
     private final CollabObjectStorage storage;
     private final ProjectRepository projects;
     private final TransactionTemplate tx;
+    private final CollabMaintenanceMode maintenance;
+    private final CollabMetrics metrics;
     /**
      * 初始化组件依赖及配置，供后续业务方法使用。
      *
@@ -20,8 +22,10 @@ public class CollabPersistenceService {
      * @param projects 项目仓储
      * @param tx 事务执行模板
      */
-    public CollabPersistenceService(CollabStore store, CollabObjectStorage storage, ProjectRepository projects, TransactionTemplate tx) {
+    public CollabPersistenceService(CollabStore store, CollabObjectStorage storage, ProjectRepository projects, TransactionTemplate tx,
+            CollabMaintenanceMode maintenance, CollabMetrics metrics) {
         this.store = store; this.storage = storage; this.projects = projects; this.tx = tx;
+        this.maintenance = maintenance; this.metrics = metrics;
     }
     /**
      * 确认项目为有效的团队协作项目后读取当前指针；缺失指针视为存储损坏。
@@ -60,6 +64,18 @@ public class CollabPersistenceService {
      * @return 本次提交的新指针，或相同幂等请求之前生成的回执指针
      */
     public CollabPointer persist(long id, long epoch, long generation, String key, byte[] bytes) {
+        maintenance.writable(); store.requireRecovered(id);
+        long started = System.nanoTime();
+        try {
+            var saved = persistCurrent(id, epoch, generation, key, bytes);
+            metrics.increment(CollabMetrics.Name.PERSIST_SUCCESS); return saved;
+        } catch (RuntimeException failure) {
+            metrics.increment(CollabMetrics.Name.PERSIST_FAILURE);
+            if (failure instanceof CollabFailure c && "COLLAB_GENERATION_CONFLICT".equals(c.code())) metrics.increment(CollabMetrics.Name.CAS_CONFLICT);
+            throw failure;
+        } finally { metrics.add(CollabMetrics.Name.PERSIST_NANOS, System.nanoTime() - started); }
+    }
+    private CollabPointer persistCurrent(long id, long epoch, long generation, String key, byte[] bytes) {
         validateBytes(bytes);
         if (key == null || !key.matches("[A-Za-z0-9_-]{1,100}") || epoch < 1 || generation < 1 || generation == Long.MAX_VALUE)
             throw new CollabFailure(400, "COLLAB_INVALID_REQUEST");
@@ -94,6 +110,7 @@ public class CollabPersistenceService {
      * @param id 项目 ID
      */
     private void lockProject(long id) {
+        store.requireRecovered(id);
         projects.findActiveByIdForUpdate(id).filter(p -> p.getTeamId() != null && !p.isLegacyUnowned())
                 .orElseThrow(() -> new CollabFailure(404, "PROJECT_NOT_FOUND"));
     }

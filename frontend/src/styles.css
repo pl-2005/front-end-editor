@@ -66,6 +66,7 @@ button, input { font: inherit; } button { color: inherit; }
 .v2-preview-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid #343a40; }
 .v2-workspace-grid > .sp-wrapper { min-width: 0; min-height: 0; height: 100%; }
 .v2-preview-pane { height: 100%; }
+.v2-preview-boundary { height: 100%; min-width: 0; min-height: 0; }
 .v2-preview-pane > .sp-wrapper, .v2-preview-pane > .sp-stack { flex: 1; min-height: 0; }
 .v2-preview-pane .sp-preview { height: 100%; }
 .v2-console { flex: 0 0 auto; max-height: 230px; overflow: auto; background: #16191c; }

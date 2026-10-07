@@ -13,6 +13,7 @@ public class CollabOrphanCleaner {
     private final CollabStore store;
     private final TransactionTemplate tx;
     private final Duration recoveryWindow, confirmationWindow;
+    private final CollabMetrics metrics;
     /**
      * 初始化组件依赖及配置，供后续业务方法使用。
      *
@@ -22,13 +23,20 @@ public class CollabOrphanCleaner {
      * @param recoveryWindow 协作文档恢复保护时长
      * @param confirmationWindow 孤儿对象再次确认前的保护时长
      */
+    @org.springframework.beans.factory.annotation.Autowired
     public CollabOrphanCleaner(CollabObjectStorage storage, CollabStore store, TransactionTemplate tx,
             @Value("${editor.collaboration.cleanup.recovery-window:30d}") Duration recoveryWindow,
-            @Value("${editor.collaboration.cleanup.confirmation-window:24h}") Duration confirmationWindow) {
+            @Value("${editor.collaboration.cleanup.confirmation-window:24h}") Duration confirmationWindow, CollabMetrics metrics) {
         this.storage = storage; this.store = store; this.tx = tx;
-        if (recoveryWindow.isNegative() || recoveryWindow.isZero() || confirmationWindow.isNegative() || confirmationWindow.isZero())
-            throw new IllegalArgumentException("Cleanup windows must be positive");
+        this.metrics = metrics;
+        if (recoveryWindow.isNegative() || recoveryWindow.isZero() || confirmationWindow.isNegative() || confirmationWindow.isZero()
+                || recoveryWindow.compareTo(Duration.ofDays(3650)) > 0 || confirmationWindow.compareTo(Duration.ofDays(3650)) > 0)
+            throw new IllegalArgumentException("Cleanup windows must be positive and at most 3650 days");
         this.recoveryWindow = recoveryWindow; this.confirmationWindow = confirmationWindow;
+    }
+    public CollabOrphanCleaner(CollabObjectStorage storage, CollabStore store, TransactionTemplate tx,
+            Duration recoveryWindow, Duration confirmationWindow) {
+        this(storage, store, tx, recoveryWindow, confirmationWindow, new CollabMetrics());
     }
     /**
      * 使用当前时间执行定时协作文档孤儿清理。
@@ -41,14 +49,20 @@ public class CollabOrphanCleaner {
      * @param now 本次检查使用的时间
      */
     public void cleanAt(Instant now) {
-        for (var object : storage.list()) {
+        java.util.List<CollabObjectStorage.ObjectInfo> objects;
+        try { objects = storage.list(); }
+        catch (RuntimeException failure) { metrics.increment(CollabMetrics.Name.CLEANUP_FAILURE); return; }
+        for (var object : objects) {
             if (!object.key().matches("collab/projects/[1-9][0-9]*/epochs/[1-9][0-9]*/[1-9][0-9]*-[a-f0-9]{64}\\.yjs")
                     || object.modifiedAt().isAfter(now.minus(recoveryWindow))) continue;
             Duration protection = recoveryWindow.compareTo(confirmationWindow) > 0 ? recoveryWindow : confirmationWindow;
-            if (Boolean.TRUE.equals(tx.execute(status -> store.claimDeletion(object.key(), now, protection)))) {
-                storage.delete(object.key());
-                tx.executeWithoutResult(status -> store.deleted(object.key()));
-            }
+            try {
+                if (Boolean.TRUE.equals(tx.execute(status -> store.claimDeletion(object.key(), now, protection)))) {
+                    storage.delete(object.key());
+                    tx.executeWithoutResult(status -> store.deleted(object.key()));
+                    metrics.increment(CollabMetrics.Name.CLEANUP_DELETED);
+                }
+            } catch (RuntimeException failure) { metrics.increment(CollabMetrics.Name.CLEANUP_FAILURE); }
         }
     }
 }

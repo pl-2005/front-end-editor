@@ -13,6 +13,7 @@ const gateway = createGateway({
   maxRooms: number('COLLAB_MAX_ROOMS', 50), maxConnections: number('COLLAB_MAX_CONNECTIONS', 200),
   maxRoomConnections: number('COLLAB_MAX_ROOM_CONNECTIONS', 20), maxMemoryBytes: number('COLLAB_MAX_MEMORY_BYTES', 512 * 1024 * 1024),
   maxMessagesPerSecond: number('COLLAB_MAX_MESSAGES_PER_SECOND', 100), maxBytesPerSecond: number('COLLAB_MAX_BYTES_PER_SECOND', 4 * 1024 * 1024),
+  maxPendingBytes: number('COLLAB_MAX_PENDING_BYTES', 24 * 1024 * 1024), maxPendingUpdates: number('COLLAB_MAX_PENDING_UPDATES', 10000),
 })
 await gateway.server.listen()
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {

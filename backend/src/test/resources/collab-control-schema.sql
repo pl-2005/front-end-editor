@@ -14,3 +14,10 @@ CREATE TABLE IF NOT EXISTS collab_control_event (
     attempts INT NOT NULL DEFAULT 0, next_attempt_at DATETIME(6) NOT NULL,
     UNIQUE (aggregate_id, aggregate_sequence)
 );
+CREATE TABLE IF NOT EXISTS collab_recovery (
+    project_id BIGINT NOT NULL PRIMARY KEY, operation_id VARCHAR(36) NOT NULL UNIQUE,
+    expected_epoch BIGINT NOT NULL, expected_generation BIGINT NOT NULL, source_object_key VARCHAR(512) NOT NULL,
+    state VARCHAR(20) NOT NULL, target_object_key VARCHAR(512), target_hash CHAR(64), target_size BIGINT,
+    last_code VARCHAR(80), updated_at DATETIME(6) NOT NULL,
+    CHECK (state IN ('PREPARED', 'FAILED', 'COMMITTED'))
+);

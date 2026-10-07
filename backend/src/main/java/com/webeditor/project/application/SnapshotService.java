@@ -168,7 +168,7 @@ public class SnapshotService {
             storage.delete(objectKey);
         } catch (StorageException cleanupFailure) {
             original.addSuppressed(cleanupFailure);
-            log.error("Could not remove orphaned snapshot object {}", objectKey, cleanupFailure);
+            log.error("LEGACY_CLEANUP_FAILED");
         }
     }
 }

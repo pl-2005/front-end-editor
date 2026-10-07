@@ -44,6 +44,7 @@ public class CollabDeleteService {
         var p = projects.findById(id).filter(project -> project.getTeamId() != null && !project.isLegacyUnowned())
                 .orElseThrow(() -> new CollabFailure(404, "PROJECT_NOT_FOUND"));
         var pointer = store.find(id).orElseThrow(CollabFailure::corrupt);
+        try { store.requireRecovered(id); } catch (CollabFailure fenced) { return new Control(id, pointer.epoch(), "FENCED", null); }
         String op = jdbc.query("SELECT id FROM collab_operation WHERE project_id=? AND state='PREPARED'",
                 (rs, row) -> rs.getString(1), id).stream().findFirst().orElse(null);
         return new Control(id, pointer.epoch(), p.getStatus() == 0 ? "DELETED" : op == null ? "ACTIVE" : "FENCED", op);
@@ -55,6 +56,7 @@ public class CollabDeleteService {
             var project = projects.findByIdForUpdate(projectId)
                     .filter(p -> Long.valueOf(teamId).equals(p.getTeamId()) && !p.isLegacyUnowned())
                     .orElseThrow(() -> new CollabFailure(404, "PROJECT_NOT_FOUND"));
+            store.requireRecovered(projectId);
             var prior = jdbc.query("SELECT id FROM collab_operation WHERE project_id=? AND expected_lock_version=? AND operation_type='DELETE' AND state<>'ABORTED' FOR UPDATE",
                     (rs, row) -> rs.getString(1), projectId, version).stream().findFirst();
             if (prior.isPresent()) {

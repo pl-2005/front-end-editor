@@ -39,7 +39,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:collaboration;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
         "editor.collaboration.creation-enabled=true", "editor.collaboration.ticket-enabled=true",
-        "editor.collaboration.storage-secret=" + CollaborationStorageTests.SECRET })
+        "editor.collaboration.storage-secret=" + CollaborationStorageTests.SECRET,
+        "editor.collaboration.maintenance.secret=test-only-independent-maintenance-secret-32" })
 @AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class CollaborationStorageTests {
@@ -51,6 +52,7 @@ class CollaborationStorageTests {
     @Autowired com.webeditor.identity.application.AuthService authService;
     @MockitoBean CollabGatewayClient gateway;
     @Autowired CollabBackupService backups;
+    @Autowired CollabMetrics metrics;
     @MockitoSpyBean CollabStore store;
     @MockitoSpyBean CollabControlEvents events;
     @Autowired ProjectRepository projects;
@@ -94,6 +96,84 @@ class CollaborationStorageTests {
     }
     long create() { return creation.create(teamId, owner.getId(), new ProjectRequests.Create("Test", null, "vanilla", "/index.html")).id(); }
     String bearer() { return "Bearer " + tokens.issue(owner); }
+
+    CollabRecoveryService recovery() {
+        return new CollabRecoveryService(jdbc, projects, store, storage, initializer,
+                new CollabMaintenanceMode(true, false, false, false), tx, metrics, Duration.ofDays(30));
+    }
+    @Test void recoveryRebuildsCurrentObjectAtomicallyAndRetriesReturnOriginalReceipt() {
+        long id = create(); var old = persistence.describe(id); String op = UUID.randomUUID().toString();
+        when(initializer.rebuild(eq(old), eq(2L), any())).thenReturn(new byte[]{7, 8, 9});
+        var service = recovery(); var restored = service.recover(id, op, 1, 1);
+        assertThat(restored.epoch()).isEqualTo(2); assertThat(restored.generation()).isEqualTo(1);
+        assertThat(restored.objectKey()).contains("/epochs/2/1-");
+        assertThat(persistence.load(id, 2, 1)).containsExactly(7, 8, 9);
+        assertThat(service.status(id).state()).isEqualTo("COMMITTED");
+        assertThat(service.recover(id, op, 1, 1)).isEqualTo(restored);
+        assertThatThrownBy(() -> service.recover(id, op, 1, 2)).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> tickets.consume(tickets.issue(id, owner.getId()).ticket(), id, 1)).isInstanceOf(CollabFailure.class);
+        assertThat(store.referenced(old.objectKey(), Instant.now())).isTrue();
+        verify(initializer, times(1)).rebuild(eq(old), eq(2L), any());
+        assertThat(revisions.findAllByProjectIdOrderByVersionDesc(id)).isEmpty();
+    }
+    @Test void corruptRecoveryStaysFencedAcrossServiceRestartAndRejectsWritesAndDelete() {
+        long id = create(); var old = persistence.describe(id); String op = UUID.randomUUID().toString();
+        objects.put(old.objectKey(), new byte[]{9});
+        assertThatThrownBy(() -> recovery().recover(id, op, 1, 1)).isInstanceOf(CollabFailure.class);
+        assertThat(recovery().status(id).state()).isEqualTo("FAILED");
+        assertThat(deletes.control(id).state()).isEqualTo("FENCED");
+        assertThat(persistence.describe(id)).isEqualTo(old);
+        assertThatThrownBy(() -> tickets.issue(id, owner.getId())).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> persistence.persist(id, 1, 1, "blocked", new byte[]{5})).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> deletes.delete(teamId, id, owner.getId(), projects.findById(id).orElseThrow().getLockVersion())).isInstanceOf(CollabFailure.class);
+        assertThatThrownBy(() -> recovery().recover(id, UUID.randomUUID().toString(), 1, 1)).isInstanceOf(CollabFailure.class);
+        verify(initializer, never()).rebuild(any(), anyLong(), any());
+        objects.put(old.objectKey(), new byte[]{1, 2, 3});
+        when(initializer.rebuild(any(), eq(2L), any())).thenReturn(new byte[]{7, 8, 9});
+        assertThat(recovery().recover(id, op, 1, 1).epoch()).isEqualTo(2);
+    }
+    @Test void failedUploadAndDatabaseCommitPreserveAuthorityAndOperationObjects() {
+        long id = create(); var old = persistence.describe(id); String op = UUID.randomUUID().toString();
+        when(initializer.rebuild(any(), anyLong(), any())).thenReturn(new byte[]{7, 8, 9});
+        doThrow(new StorageException("sensitive-storage-response")).when(storage).put(contains("/epochs/2/"), any());
+        assertThatThrownBy(() -> recovery().recover(id, op, 1, 1)).hasMessage("COLLAB_RECOVERY_FAILED");
+        var failed = recovery().status(id);
+        assertThat(persistence.describe(id)).isEqualTo(old);
+        assertThat(store.referenced(failed.targetObjectKey(), Instant.now().plus(Duration.ofDays(90)))).isTrue();
+        doAnswer(call -> { objects.put(call.getArgument(0), ((byte[]) call.getArgument(1)).clone()); return null; })
+                .when(storage).put(anyString(), any());
+        doThrow(new IllegalStateException("commit failed with secret")).when(store).requireLease(contains("/epochs/2/"));
+        assertThatThrownBy(() -> recovery().recover(id, op, 1, 1)).hasMessage("COLLAB_RECOVERY_FAILED");
+        assertThat(persistence.describe(id)).isEqualTo(old);
+        doCallRealMethod().when(store).requireLease(anyString());
+        assertThat(recovery().recover(id, op, 1, 1).epoch()).isEqualTo(2);
+    }
+    @Test void recoveryRejectsDeletedProjectsAndStalePreconditions() {
+        long id = create();
+        assertThatThrownBy(() -> recovery().recover(id, UUID.randomUUID().toString(), 2, 1)).isInstanceOf(CollabFailure.class);
+        assertThat(recovery().status(id)).isNull();
+        tx.executeWithoutResult(s -> { var p = projects.findByIdForUpdate(id).orElseThrow(); p.delete(); projects.flush(); });
+        assertThatThrownBy(() -> recovery().recover(id, UUID.randomUUID().toString(), 1, 1)).isInstanceOf(CollabFailure.class);
+        assertThat(recovery().status(id)).isNull();
+    }
+    @Test void maintenanceHmacHasIndependentAuthorityAndPersistentReplayProtection() throws Exception {
+        String path = "/internal/collaboration/maintenance/projects/after/0";
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        mvc.perform(get(path).header("Authorization", bearer())).andExpect(status().isUnauthorized());
+        String timestamp = Long.toString(Instant.now().getEpochSecond()), nonce = UUID.randomUUID().toString();
+        String supplied = InternalHmac.sign("test-only-independent-maintenance-secret-32", "GET", path, "maintenance", timestamp, nonce, new byte[0]);
+        mvc.perform(get(path).header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", nonce).header("X-Collab-Signature", supplied))
+                .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("COLLAB_MAINTENANCE_DISABLED"));
+        mvc.perform(get(path).header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", nonce).header("X-Collab-Signature", supplied))
+                .andExpect(status().isUnauthorized());
+        nonce = UUID.randomUUID().toString();
+        mvc.perform(get(path).header("X-Collab-Timestamp", timestamp).header("X-Collab-Nonce", nonce)
+                .header("X-Collab-Signature", InternalHmac.sign(SECRET, "GET", path, "storage", timestamp, nonce, new byte[0])))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/internal/collaboration/metrics")).andExpect(status().isUnauthorized());
+        assertThatThrownBy(() -> new CollabMaintenanceMode(true, false, true, false)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CollabMaintenanceMode(true, false, false, true)).isInstanceOf(IllegalArgumentException.class);
+    }
 
     @Test void createsDurableInitialDocumentWithoutRevisionAndMetadataDoesNotExposeLegacyVersion() throws Exception {
         long id = create(); CollabPointer p = persistence.describe(id);
@@ -382,7 +462,7 @@ class CollaborationStorageTests {
         var dispatcher = new CollabControlDispatcher(jdbc, gateway, deletes, true); dispatcher.deliver();
         assertThat(jdbc.queryForObject("SELECT attempts FROM collab_control_event WHERE id=?", Integer.class, eventId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT acknowledged_at FROM collab_control_event WHERE id=?", Timestamp.class, eventId)).isNull();
-        jdbc.update("UPDATE collab_control_event SET next_attempt_at=CURRENT_TIMESTAMP WHERE id=?", eventId);
+        jdbc.update("UPDATE collab_control_event SET next_attempt_at=? WHERE id=?", Timestamp.from(Instant.now().minusSeconds(1)), eventId);
         doNothing().when(gateway).control(any()); dispatcher.deliver();
         assertThat(jdbc.queryForObject("SELECT acknowledged_at FROM collab_control_event WHERE id=?", Timestamp.class, eventId)).isNotNull();
     }

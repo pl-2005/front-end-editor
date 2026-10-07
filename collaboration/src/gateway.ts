@@ -6,13 +6,15 @@ import { LIMITS, loadDocument } from './document.js'
 import { SpringApi, NonceStore, authenticateInternal, InternalFailure, type Identity, type Authorization } from './internal.js'
 import { Room } from './room.js'
 import { ControlStore, type ControlEvent, type Fence } from './control.js'
+import { Metrics } from './metrics.js'
 
 type Context = { identity: Identity; authorization: Authorization; expires: number; closed: boolean; key: string;
   rateStart: number; messages: number; bytes: number; leaseTimer?: NodeJS.Timeout; renewTimer?: NodeJS.Timeout; awarenessId?: number }
 export type GatewayOptions = {
   enabled: boolean; origins: string[]; port: number; address: string; springUrl: string; storageSecret: string;
   gatewaySecret: string; noncePath: string; maxRooms: number; maxConnections: number; maxRoomConnections: number;
-  maxMemoryBytes: number; maxMessagesPerSecond: number; maxBytesPerSecond: number
+  maxMemoryBytes: number; maxMessagesPerSecond: number; maxBytesPerSecond: number;
+  maxPendingBytes?: number; maxPendingUpdates?: number
 }
 export function parseRoom(name: string): { projectId: number; epoch: number } {
   const match = /^project:([1-9]\d*):epoch:([1-9]\d*)$/.exec(name)
@@ -43,6 +45,10 @@ function validSelection(value: unknown): boolean {
 }
 
 export function createGateway(options: GatewayOptions) {
+  for (const value of [options.maxRooms, options.maxConnections, options.maxRoomConnections, options.maxMemoryBytes,
+    options.maxMessagesPerSecond, options.maxBytesPerSecond, options.maxPendingBytes ?? 24 * 1024 * 1024, options.maxPendingUpdates ?? 10000])
+    if (!Number.isSafeInteger(value) || value <= 0) throw new InternalFailure('COLLAB_INVALID_CAPACITY')
+  const metrics = new Metrics()
   const api = new SpringApi(options.springUrl, options.storageSecret), nonces = new NonceStore(options.noncePath)
   if (Buffer.byteLength(options.gatewaySecret) < 32 || options.gatewaySecret === options.storageSecret) throw new InternalFailure('COLLAB_INTERNAL_UNCONFIGURED')
   const rooms = new Map<string, Room>(), claims = new Map<string, string>(), awarenessOwners = new Map<string, Map<number, string>>()
@@ -90,13 +96,15 @@ export function createGateway(options: GatewayOptions) {
         await api.revalidate(context.authorization)
         if (context.closed || performance.now() >= context.expires || started + 5000 <= performance.now()) { close(); return }
         context.expires = started + 5000; armLease(context, connection)
-      } catch (error) { close(error instanceof InternalFailure && error.code === 'COLLAB_PROJECT_FENCED') }
+      } catch (error) { metrics.add('authorization_failure'); close(error instanceof InternalFailure && error.code === 'COLLAB_PROJECT_FENCED') }
     }, Math.max(0, context.expires - performance.now() - 1500))
   }
   const server = new Server<Context>({
     port: options.port, address: options.address, quiet: true, stopOnSignals: false,
     websocketOptions: { maxPayload: LIMITS.updateBytes + 1024, perMessageDeflate: false },
     debounce: 1000, maxDebounce: 5000,
+    maxUnauthenticatedQueueSize: 2 * LIMITS.updateBytes + 2048,
+    maxUnauthenticatedQueueMessages: 100, maxPendingDocuments: 1,
     async onUpgrade({ request, socket }) {
       try {
         requireOrigin(request.headers.origin)
@@ -110,6 +118,7 @@ export function createGateway(options: GatewayOptions) {
           if (bytes > options.maxBytesPerSecond + 4096 || process.memoryUsage().rss >= options.maxMemoryBytes) socket.destroy()
         })
       } catch {
+        metrics.add('upgrade_rejected')
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
         throw null // Hocuspocus onUpgrade uses an empty rejection to suppress its default upgrade.
       }
@@ -119,21 +128,26 @@ export function createGateway(options: GatewayOptions) {
       if (requestParameters.size) throw new InternalFailure('COLLAB_QUERY_DENIED', 403)
     },
     async onAuthenticate({ token, documentName, socketId, requestHeaders }) {
-      requireOrigin(requestHeaders.get('origin'))
-      const target = parseRoom(documentName), key = `${socketId}/${documentName}`
-      await checkControl(target.projectId, target.epoch)
-      if (claims.size >= options.maxConnections || [...claims.values()].filter(name => name === documentName).length >= options.maxRoomConnections)
-        throw new InternalFailure('COLLAB_CONNECTION_LIMIT', 503)
-      claims.set(key, documentName)
-      const started = performance.now()
+      const key = `${socketId}/${documentName}`
       try {
+        requireOrigin(requestHeaders.get('origin'))
+        const target = parseRoom(documentName)
+        await checkControl(target.projectId, target.epoch)
+        if (claims.size >= options.maxConnections || [...claims.values()].filter(name => name === documentName).length >= options.maxRoomConnections)
+          throw new InternalFailure('COLLAB_CONNECTION_LIMIT', 503)
+        claims.set(key, documentName)
+        const started = performance.now()
         const { identity, authorization } = await api.consume(token, target.projectId, target.epoch)
         await checkControl(target.projectId, target.epoch)
         if (identity.projectId !== target.projectId || identity.epoch !== target.epoch || authorization.userId !== identity.userId
           || authorization.projectId !== target.projectId || authorization.epoch !== target.epoch || performance.now() >= started + 5000)
           throw new InternalFailure('COLLAB_TICKET_INVALID', 401)
+        metrics.add('handshake_success')
         return { identity, authorization, expires: started + 5000, closed: false, key, rateStart: performance.now(), messages: 0, bytes: 0 }
-      } catch (error) { claims.delete(key); throw error }
+      } catch (error) {
+        metrics.add('handshake_failure'); claims.delete(key)
+        throw error instanceof InternalFailure ? error : new InternalFailure('COLLAB_AUTHENTICATION_FAILED')
+      }
     },
     async onLoadDocument({ documentName, document, context }) {
       const identity = parseRoom(documentName)
@@ -168,7 +182,8 @@ export function createGateway(options: GatewayOptions) {
               connection.readOnly = true; connection.close({ code: 4403, reason: 'COLLAB_PROJECT_DELETED' })
             }
             server.hocuspocus.closeConnections(documentName)
-          })
+          }, { maxPendingBytes: options.maxPendingBytes ?? 24 * 1024 * 1024,
+            maxPendingUpdates: options.maxPendingUpdates ?? 10000 }, metrics)
         rooms.set(documentName, room); awarenessOwners.set(documentName, new Map())
       } catch (error) { claims.delete(context.key); throw error }
       finally { loading-- }
@@ -182,13 +197,13 @@ export function createGateway(options: GatewayOptions) {
       if (room) connection.sendStateless(JSON.stringify(room.state()))
     },
     async beforeHandleMessage({ context, update, documentName, document }) {
+      try {
       writable(context)
       if (update.byteLength > LIMITS.updateBytes + 1024) throw new InternalFailure('COLLAB_MESSAGE_TOO_LARGE', 413)
       const now = performance.now()
       if (now - context.rateStart >= 1000) { context.rateStart = now; context.messages = 0; context.bytes = 0 }
       if (++context.messages > options.maxMessagesPerSecond || (context.bytes += update.byteLength) > options.maxBytesPerSecond)
         throw new InternalFailure('COLLAB_RATE_LIMIT', 429)
-      try {
       const decoder = decoding.createDecoder(update)
       decoding.readVarString(decoder) // Hocuspocus validates the document/session address before this hook.
       const type = decoding.readVarUint(decoder)
@@ -226,6 +241,7 @@ export function createGateway(options: GatewayOptions) {
           removeAwarenessStates(document.awareness, [own.id], 'gateway-awareness-remove')
       }
       } catch (error) {
+        metrics.add('update_rejected')
         if (error instanceof InternalFailure) throw error
         // Decoders/JSON errors can embed input fragments. Only a stable code reaches framework logging.
         throw new InternalFailure('COLLAB_MESSAGE_INVALID', 400)
@@ -267,6 +283,18 @@ export function createGateway(options: GatewayOptions) {
     },
     async onRequest({ request, response }) {
       try {
+        if (request.url === '/internal/collaboration/metrics' && request.method === 'GET') {
+          const chunks: Buffer[] = []; let size = 0
+          for await (const chunk of request) { size += chunk.length; if (size > 4096) throw new InternalFailure('COLLAB_MESSAGE_TOO_LARGE', 413); chunks.push(chunk) }
+          authenticateInternal(request, Buffer.concat(chunks), options.gatewaySecret, 'gateway', nonces)
+          response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({
+            counters: metrics.snapshot(), rooms: rooms.size, connections: connections.size, sockets: sockets.size,
+            memoryBytes: process.memoryUsage().rss, pendingBytes: [...rooms.values()].reduce((n, r) => n + r.pendingBytes, 0),
+            documents: [...rooms.values()].map(r => ({ projectId: r.pointer.projectId, epoch: r.pointer.epoch,
+              generation: r.pointer.generation, pendingUpdates: r.pending.length,
+              durableGap: r.dirtySequence - r.durableSequence, paused: r.paused, fenced: r.fenced })) }))
+          throw null
+        }
         const match = /^\/internal\/collaboration\/projects\/([1-9]\d*)\/(flush|fence)$/.exec(request.url ?? '')
         const control = request.url === '/internal/collaboration/control'
         if ((!match && !control) || request.method !== 'POST') { response.writeHead(404).end(); throw null }
@@ -346,13 +374,13 @@ export function createGateway(options: GatewayOptions) {
         response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(fence ?? { projectId: id, epoch: saved.epoch,
           generation: saved.generation, contentHash: saved.contentHash, durableSequence: room?.durableSequence ?? 0 }))
       } catch (error) {
-        if (error !== null) response.writeHead(error instanceof InternalFailure ? error.status : 503).end(JSON.stringify({ code: 'COLLAB_CONTROL_FAILED' }))
+        if (error !== null) { metrics.add('control_failure'); response.writeHead(error instanceof InternalFailure ? error.status : 503).end(JSON.stringify({ code: 'COLLAB_CONTROL_FAILED' })) }
       }
       throw null
     },
   })
   server.httpServer.requestTimeout = 15000; server.httpServer.headersTimeout = 10000
-  return { server, rooms,
+  return { server, rooms, metrics,
     stop(): Promise<void> {
       return stopPromise ??= (async () => {
         stopping = true

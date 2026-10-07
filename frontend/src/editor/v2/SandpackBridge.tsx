@@ -1,9 +1,25 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { SandpackPreview, SandpackProvider, useSandpack } from '@codesandbox/sandpack-react'
 import { PreviewConsole } from '../PreviewConsole'
 import type { CollaborationSession } from '../../collaboration/session'
 import type { ProjectFiles } from '../../types/project'
 import { previewProjection } from './projection'
+/** Sandpack runs code at its own remote origin; disallow parent navigation and referrer disclosure. */
+function PreviewBoundary({ children }: { children: ReactNode }) {
+  const container = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const root = container.current!
+    const protect = () => root.querySelectorAll('iframe').forEach(frame => {
+      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
+      frame.referrerPolicy = 'no-referrer'
+    })
+    protect()
+    const observer = new MutationObserver(protect)
+    observer.observe(root, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
+  return <div ref={container} className="v2-preview-boundary">{children}</div>
+}
 function Projection({ session, entry }: { session: CollaborationSession; entry: string }) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot)
   const { sandpack, listen, dispatch } = useSandpack()
@@ -51,6 +67,6 @@ export function SandpackBridge({ session, entry, structureKey }: { session: Coll
   const customSetup = useMemo(() => ({ entry }), [entry])
   return <SandpackProvider key={`${session.identity.projectId}:${session.identity.epoch}:${entry}:${structureKey}`} template="vite" files={initial.files}
     customSetup={customSetup} options={{ autorun: true, recompileMode: 'delayed', recompileDelay: 300 }} theme="dark">
-    <Projection session={session} entry={entry} />
+    <PreviewBoundary><Projection session={session} entry={entry} /></PreviewBoundary>
   </SandpackProvider>
 }
