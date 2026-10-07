@@ -2,6 +2,8 @@
 
 本说明适用于完整 V2，单 Spring API、单 Hocuspocus 网关和受信初始化服务。所有 V2 制品从启动起强制 Bearer 认证。生产入口切换是部署操作，不是数据库状态迁移。不能回滚至 V1 匿名服务。
 
+交付状态：步骤 01–11 已开发完成，当前仅本机运行，公网入口未切换。首次配置、依赖准备和开发检查见 [开发指南](./development.md)，全部资料见 [文档索引](../README.md)。以下生产流程供后续部署使用，不代表已经执行。
+
 ## 制品与兼容矩阵
 
 | 组件 | 当前约定 | 发布/回滚要求 |
@@ -22,21 +24,14 @@
 
 在仓库根运行，构建输出与备份不提交 Git：
 
-本机 Windows 推荐 `./collaboration/scripts/build-step11.ps1`，逐项检查退出码，把前端及 TypeScript 缓存输出到 `.codex-build`，避免改写已有 node_modules 缓存目录。该脚本执行以下等价检查并生成新的不可变发布目录；任一步失败即停止。
+本机 Windows 推荐 `./collaboration/scripts/build-step11.ps1`，逐项检查退出码，把前端及 TypeScript 缓存输出到 `.codex-build`，避免改写已有 node_modules 缓存目录。首次准备 frontend/collaboration 的 npm 依赖及 Maven 缓存，详见开发指南。该脚本完成测试、lint、类型检查、构建并生成新的不可变发布目录；任一步失败即停止。
 
 ```powershell
-Push-Location backend
-mvn -o package "-Deditor.build.directory=E:/labStudy/DEMOS/front-end-editor/.codex-build/step11-backend"
-Pop-Location
-Push-Location frontend
-npm test
-npm run lint
-npm run build
-Pop-Location
+$taskReleaseId = 'release-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+./collaboration/scripts/build-step11.ps1 -ReleaseId $taskReleaseId
+if ($LASTEXITCODE -ne 0) { throw '构建失败' }
 Push-Location collaboration
-npm test
-node scripts/release.mjs pack ../.codex-build/release-YYYYMMDD-ID
-node scripts/release.mjs verify ../.codex-build/release-YYYYMMDD-ID
+node scripts/release.mjs verify "../.codex-build/$taskReleaseId"
 Pop-Location
 ```
 

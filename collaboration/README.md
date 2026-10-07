@@ -1,6 +1,8 @@
 # 协作文档、网关与 V2 本机运行
 
-`src/document.ts` 是初始化服务和后续网关共用的 Y.Doc schema、编码、加载、复制与校验模块。文件用稳定 fileId 与 Y.Text 管理；支持 HTML/CSS/JS/JSON/TXT/Markdown。上限为 100 文件、单文件 1 MiB、正文合计 10 MiB、完整二进制 12 MiB；后续网关 Update 上限为 2 MiB。
+本文集中记录 Y.Doc、网关与内部协议，并保留各阶段验收命令。当前完整启动优先使用 `npm run start:local`，前提是已生成 Step11 构建产物；见 [开发指南](../docs/V__2/development.md)和 [发布说明](../docs/V__2/step11-release.md)。步骤 01–11 已开发完成，生产默认开关关闭，公网入口未切换。REST 总览见 [V2 API](../docs/V__2/api.md)，全部资料见 [文档索引](../docs/README.md)。
+
+`src/document.ts` 是初始化服务和网关共用的 Y.Doc schema、编码、加载、复制与校验模块。文件用稳定 fileId 与 Y.Text 管理；支持 HTML/CSS/JS/JSON/TXT/Markdown。上限为 100 文件、单文件 1 MiB、正文合计 10 MiB、完整二进制 12 MiB；网关 Update 上限为 2 MiB。
 
 ## 本地启动
 
@@ -66,8 +68,10 @@ SHA256(BODY)
 本机功能验证脚本使用根 `.env` 的服务配置，只在子进程中生成临时 HMAC 密钥，不修改根配置。它会保留临时验收账号、团队、项目和 MinIO 对象，身份凭据不写入状态文件。需先确保本机三项服务运行，并构建后端到指定目录：
 
 ```powershell
+# 从仓库根目录执行。
+$step05BuildPath = Join-Path (Get-Location).Path '.codex-build/step05-backend'
 cd backend
-mvn -o package "-Deditor.build.directory=E:/labStudy/DEMOS/front-end-editor/.codex-build/step05-backend"
+mvn -o package "-Deditor.build.directory=$step05BuildPath"
 cd ../collaboration
 npm run build
 node scripts/verify-local.mjs
@@ -86,7 +90,7 @@ npm start
 npm run start:gateway
 ```
 
-启动器仅向网关传递协作配置和必要系统环境，不传入 MySQL、MinIO 或 JWT 凭据。两个 Node 服务仅监听 loopback。默认入口是 `ws://127.0.0.1:8092/collaboration`；浏览器入口由反向代理提供，只转发该精确路径，拒绝 `/internal/`。生产反向代理协作入口在 Step11 前保持关闭，默认 Spring 票据和网关握手开关均为 false。
+启动器仅向网关传递协作配置和必要系统环境，不传入 MySQL、MinIO 或 JWT 凭据。两个 Node 服务仅监听 loopback。默认入口是 `ws://127.0.0.1:8092/collaboration`；浏览器入口由反向代理提供，只转发该精确路径，拒绝 `/internal/`。最终 V2 开发与本机验收已完成；公网入口未切换，默认 Spring 票据和网关握手开关均为 false。
 
 `COLLAB_ALLOWED_ORIGINS` 使用逗号分隔的精确 Origin，如 `http://localhost:5173`，不支持通配符、缺失 Origin 或 URL query 参数。浏览器使用 JWT 调用 `POST /api/projects/{id}/collab-ticket`，响应 data 包含 ticket/expiresAt/projectId/epoch；将 ticket 交给 Hocuspocus Provider 的 token 配置，通过认证消息发送，房间名为 `project:{id}:epoch:{epoch}`。重连必须新申请票据，不能将票据放到 URL 或持久化存储。
 
@@ -144,7 +148,7 @@ node scripts/verify-step07-local.mjs
 
 脚本读取根 `.env`，在独立 Vite/Java/网关进程中使用 loopback 15173/18086/18092/18093，避免 Vite 编译干扰网关五秒租约。验证真实补全接受、HTML/CSS/JS 诊断、跨文件导入、结构操作、undo/redo、容量保护、大文件降级、Sandpack 控制台、自动持久化、网关重启、新票据、工作区重开和服务端撤权后的模型清理。结束后关闭临时服务和验收页，保留验收账号、项目与 `.codex-build/step07-workspace.png`；身份及内部凭据仅在内存中，不修改根 `.env`。可用 CDP_PROXY_URL 覆盖本机 proxy 地址。
 
-上述记录对应 Step07 验收；Step08 已补齐离线日志、持续编辑与 Presence，见下节。项目删除与 Outbox 主动撤权的协议和验收见 Step09 一节。生产开关保持关闭，Step11 才发布完整 V2。
+上述记录对应 Step07 验收；Step08 已补齐离线日志、持续编辑与 Presence，见下节。项目删除与 Outbox 主动撤权的协议和验收见 Step09 一节。完整 V2 已由 Step11 交付并完成本机验收；生产开关保持关闭，公网入口未切换。
 
 ## Step08 本机浏览器验收
 
@@ -203,7 +207,7 @@ npm test
 node scripts/verify-step09-local.mjs
 ```
 
-脚本使用根 `.env` 的本机 MySQL/MinIO/Redis，在 loopback 18089/18094/18095 启动临时 Spring、网关及初始化服务。验证编辑中 durable 删除、无活动房间删除、重复删除、旧票据拒绝、MinIO 最后对象保留、四类 Outbox 主动撤权、其他成员继续编辑及网关重启恢复。MinIO 签名读取仅由验收脚本使用本机配置，网关没有 MinIO 凭据。结束后关闭临时进程，验收账号及项目保留；不使用 Docker，不修改根 `.env`，不打印或落盘身份/内部凭据。生产协作入口仍等待 Step11。
+脚本使用根 `.env` 的本机 MySQL/MinIO/Redis，在 loopback 18089/18094/18095 启动临时 Spring、网关及初始化服务。验证编辑中 durable 删除、无活动房间删除、重复删除、旧票据拒绝、MinIO 最后对象保留、四类 Outbox 主动撤权、其他成员继续编辑及网关重启恢复。MinIO 签名读取仅由验收脚本使用本机配置，网关没有 MinIO 凭据。结束后关闭临时进程，验收账号及项目保留；不使用 Docker，不修改根 `.env`，不打印或落盘身份/内部凭据。完整本机交付已由 Step11 验收，生产协作入口保持关闭。
 
 ## Step10 安全、指标与当前文件恢复
 
@@ -219,8 +223,8 @@ node scripts/verify-step10-local.mjs
 node scripts/verify-step10-local.mjs --browser
 ```
 
-验收脚本保留验收账号、项目和受限备份目录，关闭自己启动的进程和标签页，不修改根 `.env` 或打印凭据。生产公开入口继续等待 Step11。
-# Step11 本机完整 V2
+验收脚本保留验收账号、项目和受限备份目录，关闭自己启动的进程和标签页，不修改根 `.env` 或打印凭据。完整本机交付已由 Step11 验收，公网入口未切换。
+## Step11 本机完整 V2
 
 Step11 已交付发布包/校验、同源路由、回滚说明及完整本机验收。先在仓库根运行 `./collaboration/scripts/build-step11.ps1`；在本目录运行 `npm run verify:step11`（需要 web-access CDP proxy），再执行 `npm run start:local`，打开 `http://127.0.0.1:15175`。
 

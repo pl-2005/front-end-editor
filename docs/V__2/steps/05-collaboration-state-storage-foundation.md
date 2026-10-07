@@ -1,5 +1,7 @@
 # 步骤 05：Y.Doc 初始文件与当前状态持久化
 
+> 文档定位：已完成步骤的设计与实施记录。阶段限制和测试数量按当时情况保留；最终行为见 [V2 交付索引](../README.md)、[开发指南](../development.md)和 [API](../api.md)。
+
 > 前置：步骤 01、03、04。状态：已实现并完成自动检查和本机功能验收（2026-10-04）。目标：新项目无需 revision 即有可恢复的权威文件状态。
 
 ## 实现记录
@@ -36,7 +38,7 @@
 
 ## 旧写入口
 
-V2 新项目不写 `project_revision` 或 JSON/GZIP 快照；现有 `project.current_version` 保持数据库默认 0，`current_object_key` 保持 NULL，只为兼容旧表结构，V2 API 不返回或依赖它们。V1 浏览器 snapshot 保存、revision 列表/创建和历史恢复接口对 V2 项目固定关闭；旧匿名项目仍隔离。项目元数据使用独立 `lock_version`。软删除在网关启用后必须经步骤 09 flush/fence；在协调链路完成前，协作项目删除入口保持关闭。
+V2 新项目不写 `project_revision` 或 JSON/GZIP 快照；现有 `project.current_version` 保持数据库默认 0，`current_object_key` 保持 NULL，只为兼容旧表结构，V2 API 不返回或依赖它们。V1 浏览器 snapshot 保存、revision 列表/创建和历史恢复接口对 V2 项目固定关闭；旧匿名项目仍隔离。项目元数据使用独立 `lock_version`。软删除已接入步骤 09 flush/fence；实现期间在协调链路完成前保持入口关闭，最终 V2 有效成员可执行受协调的软删除。
 
 ## 功能验收
 

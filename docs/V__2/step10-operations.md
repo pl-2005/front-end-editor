@@ -1,6 +1,8 @@
 # Step10 运维：指标、联合备份与当前文件恢复
 
-本文只描述受控运维。没有用户历史版本、checkpoint、恢复已删除项目或 V1 revision 回退。生产外部入口由 Step11 开放，所有 `/internal/` 路由必须在反向代理阻断。
+本文只描述受控运维。没有用户历史版本、checkpoint、恢复已删除项目或 V1 revision 回退。生产入口开放流程见 Step11；当前仅本机运行，公网未切换，所有 `/internal/` 路由必须在反向代理阻断。
+
+本机环境与依赖准备见 [开发指南](./development.md)，当前架构见 [架构说明](./architecture.md)，部署及回滚见 [发布说明](./step11-release.md)。
 
 ## 配置与身份
 
@@ -76,8 +78,9 @@ node scripts/maintenance.mjs recover PROJECT_ID EXPECTED_EPOCH EXPECTED_GENERATI
 
 ```powershell
 # 在仓库根目录执行；构建不读取/打印 .env。
+$step10BuildPath = Join-Path (Get-Location).Path '.codex-build/step10-backend'
 cd backend
-mvn -o package "-Deditor.build.directory=E:/labStudy/DEMOS/front-end-editor/.codex-build/step10-backend"
+mvn -o package "-Deditor.build.directory=$step10BuildPath"
 cd ../collaboration
 npm test
 node scripts/verify-step10-local.mjs

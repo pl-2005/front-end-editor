@@ -1,184 +1,71 @@
 # Web Editor
 
-一个面向 HTML、CSS 和 JavaScript 的浏览器在线编辑器。V2 使用 Spring Boot 管理身份、团队授权和项目元数据，Hocuspocus 网关负责 Yjs 协作与自动持久化，MySQL 保存当前文档指针，MinIO 保存 Y.Doc 二进制。项目工作区使用 Monaco 编辑 Y.Text，Sandpack 单向派生预览和控制台。
+面向 HTML、CSS 和 JavaScript 的浏览器多人编辑器。用户注册登录后创建或加入团队，团队成员共同编辑项目文件；Monaco 提供补全与诊断，Sandpack 提供预览和控制台，Yjs 负责同步与离线合并。
 
-> V2 已完成 Step01–11 的仓库交付及本机功能验收：身份/团队、Y.Doc 多人协作、Monaco/Sandpack、离线重连、删除/撤权、安全指标与恢复，以及可校验发布包和回滚说明。按用户要求仅本机运行，前端/REST/WebSocket 同源入口为 `http://127.0.0.1:15175`；在 `collaboration` 执行 `npm run start:local`。使用根 `.env` 的本机 MySQL/MinIO/Redis，不使用 Docker。启动器仅在本次进程开启协作，生产默认开关及外部入口保持关闭。详情见 [Step11 操作说明](docs/V__2/step11-release.md) 和 [完整进度](docs/V__2/README.md)。
+V2 步骤 01–11 已开发完成，原有自动检查和本机功能验收记录见 [V2 交付索引](docs/V__2/README.md)。当前交付范围为本机运行，公网入口切换、目标 nginx/TLS 验证及历史候选回滚尚未执行。
 
-## V1 功能记录
+## 功能与边界
 
-- 项目：新建、打开、重命名和软删除；
-- 文件：目录树展示，以及文本文件的新建、编辑、重命名和删除；
-- 运行：实时预览、刷新预览、运行日志与编译错误控制台；
-- 保存：停止编辑 1.5 秒后自动保存，也可使用 `Ctrl/Cmd + S` 手动保存；
-- 草稿：未保存内容写入 IndexedDB，刷新或网络恢复后可继续处理；
-- 并发保护：基于版本号检测写入冲突，可重新加载或另存副本；
-- 版本历史：查看历史快照，并将任一历史内容恢复为一个新版本；
-- 存储维护：启动时初始化 MinIO Bucket，并定时清理无数据库引用的孤立快照。
+- 自助注册、登录、凭据刷新、改密和退出所有设备。
+- 团队创建、发现、加入审批、站内邀请、成员管理和所有权转移；OWNER 管理成员，所有有效成员对团队项目同权。
+- 项目创建、复制、修改元数据和软删除；多文件协作、文件结构操作、在线成员及远端光标。
+- HTML/CSS/JS 补全与诊断、JS checkJs、文本撤销/重做、预览和运行日志。
+- 自动持久化当前 Y.Doc、有界离线日志、重新授权后合并；同步与持久化分别显示。
+- 删除前持久化并冻结房间，撤权关闭旧连接；指标、联合备份、当前内容恢复和发布包校验。
 
-上述保存、草稿、版本历史和软删除流程记录 V1 行为。V2 通过协作网关自动保存当前 Y.Doc，不开放旧快照写入和版本历史接口；有效会话断线后使用有界本地日志继续编辑，重新授权后合并，撤权清理缓存。协作项目软删除保留最后持久化对象，删除后拒绝旧连接及旧 epoch 写入。项目不支持 npm 依赖管理、服务端代码执行或 Git 集成。
+首期为单网关实例。支持 HTML/CSS/JS/JSON/TXT/Markdown；每项目最多 100 文件，单文件 1 MiB、总正文 10 MiB、Y.Doc 12 MiB、Update 2 MiB。超过 200 KiB 的文件使用基础高亮并停用昂贵语言服务。V2 不提供用户历史版本、检查点或历史回退，也不提供 npm 依赖管理、服务端代码执行或 Git 集成。
 
-## 技术栈
+## 本机快速运行
 
-| 模块 | 技术 |
-| --- | --- |
-| 前端 | React、TypeScript、Vite、Sandpack、IndexedDB、Vitest |
-| 后端 | Java 21、Spring Boot 3.5、Spring Web、Spring Data JPA、Bean Validation |
-| 协作服务 | Node.js 24+、TypeScript、Yjs、Hocuspocus 4.7 |
-| 数据与存储 | MySQL 8、Flyway、MinIO、Redis；内部 nonce 接收端使用 MySQL/本机 SQLite |
+准备 Node.js 24+、JDK 21、Maven 3.9+ 和本机 MySQL 8、MinIO、Redis。使用仓库根 `.env` 配置服务与独立密钥；仅首次配置时复制 [.env.example](.env.example)，不要覆盖已有 `.env`。不使用 Docker 或 Docker Compose，不打印或提交凭据。
 
-## 项目结构
-
-```text
-front-end-editor/
-├── frontend/                  # React 编辑器、预览、草稿与 API 客户端
-├── backend/                   # Spring Boot API、领域逻辑和存储适配
-├── collaboration/             # Y.Doc 编码、协作网关、内部协议与验收脚本
-├── docs/
-│   ├── V__1/                  # V1 接口、部署与架构记录
-│   └── V__2/                  # V2 总方案、开发步骤与进度
-├── .env.example               # 本地配置模板
-└── README.md
-```
-
-## 本地运行
-
-### 1. 准备环境
-
-- Node.js 24+
-- JDK 21
-- Maven 3.9+
-- 本机运行的 MySQL 8、MinIO 和 Redis
-
-本项目本地开发和验收使用仓库根目录的 `.env`，直接连接本机 MySQL、MinIO 与 Redis，不使用 Docker 或 Docker Compose。首次运行可从模板创建配置：
+以下命令从仓库根目录执行；首次安装依赖，已有安装可跳过 `npm ci`。构建脚本使用 Maven 离线模式，首次使用须先准备 Maven 依赖，具体见 [开发指南](docs/V__2/development.md)。
 
 ```powershell
-Copy-Item .env.example .env
-```
-
-编辑 `.env`，填写本机服务地址与凭据。确保 `DB_URL` 指向已创建的数据库，数据库用户能够执行 Flyway 迁移，`MINIO_ENDPOINT` 指向 MinIO API 端口且凭据有效。默认配置会自动创建私有 Bucket。
-
-`.env` 已被 Git 忽略，请勿提交真实凭据。
-
-### 2. 启动后端
-
-在仓库根目录执行：
-
-```powershell
-cd backend
-Get-Content ..\.env | ForEach-Object {
-  if ($_ -match '^\s*([^#][A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
-    [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
-  }
-}
-mvn spring-boot:run
-```
-
-Flyway 会在启动时自动执行数据库迁移。健康检查地址为 `http://localhost:8080/api/health`。
-
-### 3. 启动前端
-
-打开新终端，在仓库根目录执行：
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-访问 `http://localhost:5173`。Vite 会将 `/api` 请求代理到 `http://localhost:8080`。
-
-### 4. 启动本机协作编辑服务
-
-V2 编辑器必须连接协作网关才能加载文件。仅启动前后端会显示“协作编辑暂未开放”或连接失败。在根 `.env` 中设置 `COLLAB_TICKET_ENABLED=true`、`COLLAB_GATEWAY_ENABLED=true`，填写独立且至少 32 字节的 `COLLAB_GATEWAY_SECRET`，并设置 `COLLAB_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173`。与已有 storage/initializer 密钥保持区分；修改后重启后端。
-
-在另外两个终端启动初始化服务和网关（已运行的服务无需重复启动）：
-
-```powershell
-cd collaboration
+Push-Location frontend
 npm ci
-npm run build
-npm start
-# 另一个终端，仍在 collaboration 目录
-npm run start:gateway
-```
-
-默认初始化服务和网关分别监听本机 8091、8092；Vite 代理精确 `/collaboration` 路径。本机开关不代表生产开放，生产环境仍按 Step11 进行入口验收。详见 [协作启动说明](collaboration/README.md#step06-网关启动与协议)。
-
-### 4. 受控协作服务
-
-按 [协作模块运行说明](collaboration/README.md#step06-网关启动与协议)配置三个独立内部 HMAC 密钥、精确 Origin 白名单以及 Spring/网关地址，构建协作模块后分别执行 `npm start` 和 `npm run start:gateway`。初始化服务默认监听本机 8091，网关默认监听本机 8092 的 `/collaboration`；Vite 仅将该精确 WebSocket 路径代理到本机网关，`/internal/` 不对浏览器开放。仅受控开发环境开启创建、票据与网关开关，然后从团队项目页进入编辑器；生产入口仍等待后续步骤。
-
-## 常用命令
-
-```powershell
-# 前端检查
-cd frontend
-npm run lint
-npm run test
-npm run build
-
-# 后端测试（另一个终端）
-cd backend
-mvn test
-
-# 协作模块检查（另一个终端）
-cd collaboration
+Pop-Location
+Push-Location collaboration
 npm ci
-npm test
+Pop-Location
+./collaboration/scripts/build-step11.ps1
+Push-Location collaboration
+npm run start:local
+Pop-Location
 ```
 
-## V1 数据与保存机制记录
+打开 `http://127.0.0.1:15175`，注册并登录后创建团队和项目。启动器读取根 `.env`，仅在本次进程开启创建、票据和网关，不改写根配置。它提供构建后的前端及同源 REST/WebSocket；正常 `Ctrl+C` 停止会先 flush 网关。运行期间不要同时执行 Step11 验收，两者使用同一组端口。
 
-Sandpack 在浏览器中编译和运行用户代码，后端不会执行项目代码。保存时前端携带当前版本号提交完整文件集合；后端校验内容并计算哈希，将 GZIP 快照写入 MinIO，再在 MySQL 中记录版本元数据。内容未变化时不会创建重复版本，版本不一致时返回 `409 VERSION_CONFLICT`。
+| 服务 | 本机完整启动器 | 分进程开发默认值 |
+| --- | --- | --- |
+| 浏览器入口 | `http://127.0.0.1:15175` | `http://localhost:5173` |
+| Spring API | `http://127.0.0.1:18098/api` | `http://localhost:8080/api` |
+| 协作网关 | `ws://127.0.0.1:18099/collaboration` | `ws://127.0.0.1:8092/collaboration` |
+| 初始化服务 | `http://127.0.0.1:18100/internal/initialize` | `http://127.0.0.1:8091/internal/initialize` |
 
-编辑内容同时保存在浏览器 IndexedDB 中。只有草稿基于服务端当前版本时才会自动恢复，旧版本草稿会保留提示，避免静默覆盖新内容。
+MySQL、MinIO 和 Redis 的实际地址以根 `.env` 为准。内部路径由浏览器入口阻断；浏览器只访问同源 `/api/` 和精确 `/collaboration`。
 
-V2 使用 Y.Doc 作为内容事实源：有效 Update 在广播前验证，网关以 1 秒防抖、最长 5 秒延迟保存完整文档，并通过 generation CAS 切换当前指针。保存失败保留 pending 并暂停写入；离房和正常停机也 flush。同步与持久化是独立状态，不创建 revision 或用户历史版本。浏览器按账号、项目和 epoch 保存有界离线更新，新票据重新授权后重发；旧 epoch 和撤权缓存不能写回。
+## 技术与结构
 
-## 默认地址
-
-| 服务 | 地址 |
+| 模块 | 技术与职责 |
 | --- | --- |
-| 前端 | `http://localhost:5173` |
-| 后端 API | `http://localhost:8080/api` |
-| 健康检查 | `http://localhost:8080/api/health` |
-| Y.Doc 初始化服务（仅本机内部） | `http://127.0.0.1:8091/internal/initialize` |
-| 协作网关（受控入口） | `ws://127.0.0.1:8092/collaboration` |
-| Redis（仅本机内部） | `localhost:6379` |
-| MinIO API | `http://localhost:9000` |
-| MinIO 控制台 | `http://localhost:9001` |
+| `frontend/` | React、TypeScript、Vite、Monaco、Yjs、Sandpack、IndexedDB；身份与团队界面、协作编辑和预览 |
+| `backend/` | Java 21、Spring Boot 3.5、Security、JPA、Flyway；身份、授权、元数据、指针与控制事件 |
+| `collaboration/` | Node.js 24+、Hocuspocus 4.7、Yjs；初始化、网关、自动持久化和运维工具 |
+| 数据服务 | MySQL 8、私有 MinIO、Redis；Node 接收端以 SQLite 持久化 nonce/fence |
+| `deploy/` | 同源 nginx 配置模板 |
+| `docs/V__2/` | 当前设计、开发、接口、运维、发布及步骤记录 |
+| `docs/V__1/` | V1 历史资料 |
 
-实际地址以 `.env` 和本机服务配置为准。
+## 文档入口
 
-## 环境变量
+[全部文档索引](docs/README.md)按使用场景导航。当前版本重点文档：
 
-| 变量 | 用途 |
-| --- | --- |
-| `DB_URL` | MySQL JDBC 连接地址 |
-| `DB_USERNAME` / `DB_PASSWORD` | 应用数据库凭据 |
-| `MINIO_ENDPOINT` | MinIO API 地址 |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | MinIO 凭据 |
-| `MINIO_BUCKET` | 保存快照的私有 Bucket |
-| `MINIO_INITIALIZE_BUCKET` | 启动时是否自动创建 Bucket |
-| `SPRING_DATA_REDIS_HOST` / `SPRING_DATA_REDIS_PORT` | 本机 Redis 连接 |
-| `AUTH_REDIS_NAMESPACE` | 刷新凭据与登录节流键前缀 |
-| `JWT_SECRET` | JWT 的 HS256 签名密钥，至少 32 字节随机内容 |
-| `COLLAB_CREATION_ENABLED` | 受控项目创建、复制和初始化重试开关，默认关闭 |
-| `COLLAB_TICKET_ENABLED` / `COLLAB_GATEWAY_ENABLED` | Spring 票据与网关握手开关，默认关闭 |
-| `COLLAB_INITIALIZER_SECRET` / `COLLAB_STORAGE_SECRET` / `COLLAB_GATEWAY_SECRET` | 三个独立的内部 HMAC 密钥 |
-| `COLLAB_ALLOWED_ORIGINS` | 网关允许的精确 Origin，逗号分隔 |
-| `COLLAB_SPRING_URL` / `COLLAB_GATEWAY_INTERNAL_URL` | 网关与 Spring 双向内部调用地址 |
-| `COLLAB_INITIALIZER_NONCE_PATH` / `COLLAB_GATEWAY_NONCE_PATH` | Node 接收端的持久化 nonce 文件路径 |
-| `ORPHAN_CLEANUP_CRON` | 孤立快照定时清理表达式 |
-| `ORPHAN_CLEANUP_GRACE_PERIOD` | 孤立快照清理保护期 |
+- [V2 交付状态与步骤记录](docs/V__2/README.md)
+- [架构](docs/V__2/architecture.md)与[数据流](docs/V__2/data-flow.md)
+- [REST API](docs/V__2/api.md)与[协作内部协议](collaboration/README.md)
+- [本地开发、配置与验证](docs/V__2/development.md)
+- [指标、备份与恢复](docs/V__2/step10-operations.md)
+- [发布、回滚与本机运行](docs/V__2/step11-release.md)
 
-V2 配置模板见 [.env.example](.env.example)，协作接口和验收说明见 [collaboration/README.md](collaboration/README.md)，发布计划见 [步骤 11](docs/V__2/steps/11-release-deploy-and-functional-acceptance.md)。V1 部署和接口记录分别见 [docs/V__1/deployment.md](docs/V__1/deployment.md)与 [docs/V__1/api.md](docs/V__1/api.md)。
-
-V2 本地启动时需在根 `.env` 中配置 `JWT_SECRET`，可用 PowerShell 生成随机值：`[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))`。不要提交实际密钥。浏览器通过 Vite `/api` 代理同源请求；后端不开放浏览器跨源 CORS。
-
-## 当前限制
-
-- 单个项目最多 100 个文件；
-- 单文件最大 1 MB，未压缩快照最大 10 MB；
-- 支持 HTML、CSS、JavaScript、JSON、TXT 和 Markdown 文本文件；
-- 文件路径必须以 `/` 开头，不能包含 `..`、反斜杠、空字符或空路径段。
+V1 快照、版本历史和匿名项目资料仅供历史参考；旧数据保留且隔离，不进入 V2 用户流程。

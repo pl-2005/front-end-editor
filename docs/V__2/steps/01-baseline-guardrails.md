@@ -1,5 +1,7 @@
 # 步骤 01：现状与并发、存储护栏
 
+> 文档定位：已完成步骤的设计与实施记录。阶段限制和测试数量按当时情况保留；最终行为见 [V2 交付索引](../README.md)、[开发指南](../development.md)和 [API](../api.md)。
+
 > 前置：当前 V1 代码和已发布 Flyway V1/V2。状态：已完成（2026-09-28）。
 
 ## 目标
@@ -27,6 +29,6 @@ V3 追加 `project.lock_version BIGINT NOT NULL DEFAULT 0`，不修改 V1/V2 迁
 ## 完成记录
 
 - 项目行新增 V3 `lock_version`，元数据更新与软删除使用单个强 ETag；缺少前置条件返回 428，过期或并发更新返回 409 `PROJECT_STATE_CONFLICT`。内容快照写入后的新 `stateVersion` 会同步回客户端。
-- 元数据更新不再修改入口文件。旧快照仍走 V1 revision 流程；旧对象读取和 GZIP 解压均有硬上限，旧清理器只处理 `projects/` 前缀并跳过其他命名空间。
+- 元数据更新不再修改入口文件。当时旧快照仍走 V1 revision 流程；最终 V2 已关闭旧写入入口，旧对象读取和 GZIP 解压均有硬上限，旧清理器只处理 `projects/` 前缀并跳过其他命名空间。
 - Sandpack 输入经过运行时变换后，保存和另存副本会还原未编辑的源文件，避免派生的 charset 或 package 配置写回项目。
 - 验收：后端 Maven 测试 18 项通过（H2/Flyway V3）；前端 Vitest 25 项通过，TypeScript 检查和 Vite 生产打包通过。未运行 MySQL/MinIO 专用集成验证，步骤门禁不要求该项。

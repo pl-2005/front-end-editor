@@ -1,10 +1,12 @@
 # 步骤 07：Yjs、Monaco 语言服务与 Sandpack 派生桥
 
+> 文档定位：已完成步骤的设计与实施记录。阶段限制和测试数量按当时情况保留；最终行为见 [V2 交付索引](../README.md)、[开发指南](../development.md)和 [API](../api.md)。
+
 > 前置：步骤 06 网关握手、同步和自动持久化可用。状态：已实现并完成自动检查及本机功能验收（2026-10-05）。
 
 ## 实现记录
 
-V2 项目页按需加载 `frontend/src/editor/v2/ProjectWorkspace.tsx`，复用团队项目授权和内存 Bearer 会话。`CollaborationSession` 独立管理每个 user/project/epoch 的 Y.Doc、单次票据、Provider 和 WebSocket；每次重连重新签发票据，过期请求结果丢弃。Hocuspocus Provider 固定为 4.7.0，与网关一致。断线阶段只读；401/403/404、身份或 epoch 不匹配、服务端撤权均停止写入。撤权销毁原文档并清除文件界面；项目切换与注销释放会话、模型和监听器。
+V2 项目页按需加载 `frontend/src/editor/v2/ProjectWorkspace.tsx`，复用团队项目授权和内存 Bearer 会话。`CollaborationSession` 独立管理每个 user/project/epoch 的 Y.Doc、单次票据、Provider 和 WebSocket；每次重连重新签发票据，过期请求结果丢弃。Hocuspocus Provider 固定为 4.7.0，与网关一致。Step07 阶段断线只读；最终 Step08 已支持有效会话的有界离线编辑，401/403/404、身份或 epoch 不匹配、服务端撤权均停止写入。撤权销毁原文档并清除文件界面；项目切换与注销释放会话、模型和监听器。
 
 `collaboration/src/document-rules.ts` 为浏览器和网关共享路径、扩展名、容量及冲突规则。浏览器按 fileId 读取文件，文件创建、跨扩展名重命名、逻辑删除和入口切换均使用原子 Yjs transaction；路径执行 NFKC 与分隔符规范化，并拒绝遍历、控制字符和不支持扩展名。入口切换界面只提供当前 vanilla 预览可运行的 HTML 入口；入口路径从 Y.Doc 推导，REST `entry` 仅保留创建时元数据，不能作为编辑器或复制文档的入口权威。未知 schema 或异常结构只读隔离，不初始化覆盖。
 
@@ -20,7 +22,7 @@ Sandpack 仅消费 Y.Doc 投影，300 ms 防抖、最长 1 秒派生，运行时
 
 验证：前端 56 项测试、lint、TypeScript/Vite 构建，协作模块 16 项测试与构建，后端 43 项测试及打包通过。新增覆盖原子文件命令、未知 schema、远端撤销隔离、新票据重连、迟到授权响应、初始持久化状态门禁和房间暂停/恢复、保存确认失效、HTML 诊断、同路径归一化与纯删除/GC 确认、预览初始化重放和关闭后取消任务。真实 Chrome 验收确认三种语言补全接受、HTML/CSS 诊断、JS checkJs/JSDoc 与跨文件导入、重命名/删除模型清理、undo/redo、大文件降级及超限拦截、错误 HTML 修复后预览恢复与控制台、MySQL/MinIO 当前文件、网关重启、新票据重连、再次打开后的模型/worker 生命周期及服务端撤权清理。启动脚本见 [协作模块说明](../../../collaboration/README.md#step07-本机浏览器验收)。
 
-本机验收读取根 `.env`，使用本机 MySQL/MinIO/Redis，无 Docker，不修改根配置、不输出或落盘身份凭据；临时服务和验收标签页结束后关闭，验收账号及项目保留本机。y-indexeddb 仅准备依赖，离线持久日志、持续离线编辑及完整 Presence 由 Step08 实现；项目删除和 Outbox 主动撤权留给 Step09。生产票据/网关/入口开关不因此开放。
+本机验收读取根 `.env`，使用本机 MySQL/MinIO/Redis，无 Docker，不修改根配置、不输出或落盘身份凭据；临时服务和验收标签页结束后关闭，验收账号及项目保留本机。Step07 当时仅准备 y-indexeddb 依赖；离线日志、持续离线编辑及完整 Presence 已由 Step08 实现，删除和 Outbox 主动撤权已由 Step09 实现。生产票据/网关/入口开关不因此开放。
 
 ## 唯一编辑源
 
