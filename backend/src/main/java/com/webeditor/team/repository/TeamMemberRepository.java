@@ -6,6 +6,8 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
+    /** 批量读取当前用户的有效团队角色，避免列表逐行查询。 */
+    List<TeamMember> findByUserIdAndStatus(long userId, String status);
     /**
      * 查询团队与用户的成员关系，包含已移除记录。
      *

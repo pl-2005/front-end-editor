@@ -7,28 +7,31 @@ export function ProjectEditDialog({
   busy,
   onCancel,
   onSave,
+  kind = '项目',
 }: {
-  project: TeamProjectSummary
+  project: Pick<TeamProjectSummary, 'name' | 'description'>
   busy: boolean
   onCancel: () => void
   onSave: (name: string, description: string | null) => void
+  kind?: '项目' | '团队'
 }) {
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description ?? '')
+  const formId = kind === '项目' ? 'project-edit-form' : 'team-edit-form'
   return (
     <Modal
       open
-      title="编辑项目"
+      title={`编辑${kind}`}
       okText="保存"
       cancelText="取消"
       confirmLoading={busy}
-      okButtonProps={{ htmlType: 'submit', form: 'project-edit-form' }}
+      okButtonProps={{ htmlType: 'submit', form: formId }}
       onCancel={() => {
         if (!busy) onCancel()
       }}
     >
       <form
-        id="project-edit-form"
+        id={formId}
         onSubmit={(event) => {
           event.preventDefault()
           const nextName = name.trim()
@@ -42,9 +45,9 @@ export function ProjectEditDialog({
         }}
       >
         <label className="dialog-field">
-          项目名称
+          {kind}名称
           <Input
-            aria-label="项目名称"
+            aria-label={`${kind}名称`}
             value={name}
             onChange={(event) => setName(event.target.value)}
             required
@@ -54,9 +57,9 @@ export function ProjectEditDialog({
           />
         </label>
         <label className="dialog-field">
-          项目描述（可选）
+          {kind}描述（可选）
           <Input.TextArea
-            aria-label="项目描述"
+            aria-label={`${kind}描述`}
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             maxLength={500}

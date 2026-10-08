@@ -53,6 +53,9 @@ export const discoverTeams = (query: string, page = 0, size = 10, signal?: Abort
  */
 export const createTeam = (name: string, description: string) =>
   request<Team>('/api/teams', { method: 'POST', body: JSON.stringify({ name, description }) })
+/** 由所有者修改团队名称及描述；null 表示清空描述。 */
+export const updateTeam = (teamId: number, name: string, description: string | null) =>
+  request<Team>(base(teamId), { method: 'PUT', body: JSON.stringify({ name, description }) })
 /**
  * 读取具有成员访问权限的团队详情。
  *

@@ -29,11 +29,14 @@
 | GET | `/api/teams` | page/size | 已登录；本人团队分页 |
 | GET | `/api/teams/discover` | query/page/size | 公开只读、限流；仅可申请团队 |
 | GET | `/api/teams/{teamId}` | — | 有效成员；团队详情 |
+| PUT | `/api/teams/{teamId}` | name、可选 description | OWNER；更新名称及描述，名称必填且最多 100 字，描述最多 500 字，空值清空 |
 | GET | `/api/teams/{teamId}/members` | — | 有效成员；成员列表 |
 | PUT | `/api/teams/{teamId}/join-policy` | joinPolicy=`REQUEST` 或 `INVITE_ONLY` | OWNER；更新策略 |
 | DELETE | `/api/teams/{teamId}/members/me` | — | MEMBER；退出，204；OWNER 须先转移 |
 | DELETE | `/api/teams/{teamId}/members/{userId}` | — | OWNER；移除普通成员，204 |
 | PUT | `/api/teams/{teamId}/owner` | userId | OWNER；转移给有效成员，204 |
+
+本人团队列表及团队详情的 `role` 表示当前用户在团队内的角色（`OWNER` 或 `MEMBER`）；公开发现列表不提供用户角色。元数据编辑响应包含更新后的团队及当前用户角色。
 
 | 方法 | 加入申请路径 | 行为 |
 | --- | --- | --- |

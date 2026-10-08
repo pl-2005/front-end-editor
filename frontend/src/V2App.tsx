@@ -364,6 +364,7 @@ function TeamListPage() {
   const task = useTask()
   const [createOpen, setCreateOpen] = useState(false)
   const [items, setItems] = useState<Team[]>([])
+  const [editingTeam, setEditingTeam] = useState<Team | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState('')
   useEffect(() => {
@@ -407,6 +408,7 @@ function TeamListPage() {
             'aria-label': `查看团队 ${team.name}`,
             onClick: () => navigate(`/teams/${team.id}`),
             onKeyDown: (event) => {
+              if (event.target !== event.currentTarget) return
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault()
                 navigate(`/teams/${team.id}`)
@@ -414,6 +416,7 @@ function TeamListPage() {
             },
           })}
           dataSource={items}
+          tableLayout="fixed"
           pagination={false}
           scroll={{ x: 600 }}
           loading={{ spinning: !loaded, description: '正在加载团队…' }}
@@ -436,8 +439,44 @@ function TeamListPage() {
                 <span className="v2-team-description">{description || '暂无描述'}</span>
               ),
             },
+            {
+              title: '操作',
+              key: 'actions',
+              width: 100,
+              align: 'center',
+              render: (_, team) =>
+                team.role === 'OWNER' ? (
+                  <Tooltip title="编辑">
+                    <Button
+                      type="text"
+                      icon={<EditOutlined />}
+                      aria-label="编辑"
+                      disabled={task.busy}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setEditingTeam(team)
+                      }}
+                    />
+                  </Tooltip>
+                ) : null,
+            },
           ]}
         />
+        {editingTeam ? (
+          <ProjectEditDialog
+            project={editingTeam}
+            kind="团队"
+            busy={task.busy}
+            onCancel={() => setEditingTeam(null)}
+            onSave={(name, description) => {
+              void task.run(async () => {
+                const next = await teams.updateTeam(editingTeam.id, name, description)
+                setItems((current) => current.map((item) => (item.id === next.id ? next : item)))
+                setEditingTeam(null)
+              }, '团队已更新。')
+            }}
+          />
+        ) : null}
         <Modal
           title="创建团队"
           open={createOpen}
@@ -782,6 +821,7 @@ function TeamPage() {
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDescription, setNewProjectDescription] = useState('')
   const [creatingProject, setCreatingProject] = useState(false)
+  const [editingTeam, setEditingTeam] = useState(false)
   const [editingProject, setEditingProject] = useState<TeamProjectSummary | null>(null)
   const [initializingId, setInitializingId] = useState<number | null>(null)
   const [requests, setRequests] = useState<JoinRequest[]>([])
@@ -907,6 +947,17 @@ function TeamPage() {
             </RouteBreadcrumb>
             <div className="v2-team-title">
               <h1>{team?.name ?? '正在加载团队…'}</h1>
+              {isOwner && team ? (
+                <Tooltip title="编辑">
+                  <Button
+                    type="text"
+                    icon={<EditOutlined style={{ fontSize: 20 }} />}
+                    aria-label="编辑"
+                    disabled={task.busy}
+                    onClick={() => setEditingTeam(true)}
+                  />
+                </Tooltip>
+              ) : null}
               {isOwner && team ? (
                 <div className="v2-team-policy">
                   <Select
@@ -1201,7 +1252,7 @@ function TeamPage() {
                     {
                       title: '项目名称',
                       dataIndex: 'name',
-                      width: '30%',
+                      width: '20%',
                       ellipsis: true,
                       render: (name: string, project) => (
                         <Link to={`/teams/${teamId}/projects/${project.id}`} title={name}>
@@ -1226,8 +1277,12 @@ function TeamPage() {
                       title: '操作',
                       key: 'actions',
                       width: 200,
+                      align: 'center',
                       render: (_, project) => (
-                        <div className="v2-actions" onClick={(event) => event.stopPropagation()}>
+                        <div
+                          className="v2-actions v2-project-table-actions"
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           <Tooltip title="编辑">
                             <Button
                               type="text"
@@ -1306,6 +1361,21 @@ function TeamPage() {
               </Card>
             </section>
           </div>
+        ) : null}
+        {editingTeam && isOwner && team ? (
+          <ProjectEditDialog
+            project={team}
+            kind="团队"
+            busy={task.busy}
+            onCancel={() => setEditingTeam(false)}
+            onSave={(name, description) => {
+              void runTeam(async () => {
+                const next = await teams.updateTeam(teamId, name, description)
+                setTeam(next)
+                setEditingTeam(false)
+              }, '团队已更新。')
+            }}
+          />
         ) : null}
         {editingProject ? (
           <ProjectEditDialog

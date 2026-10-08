@@ -72,6 +72,12 @@ public class TeamController {
     ApiResponse<TeamService.TeamView> get(@PathVariable @Min(1) long teamId) {
         return ApiResponse.ok(teams.get(teamId, CurrentUser.id()));
     }
+    /** 由当前团队所有者修改名称及描述。 */
+    @PutMapping("/{teamId}")
+    ApiResponse<TeamService.TeamView> update(@PathVariable @Min(1) long teamId,
+            @Valid @RequestBody Create body) {
+        return ApiResponse.ok(teams.update(teamId, CurrentUser.id(), body.name(), body.description()));
+    }
     /**
      * 按当前用户成员权限返回团队成员资料。
      *

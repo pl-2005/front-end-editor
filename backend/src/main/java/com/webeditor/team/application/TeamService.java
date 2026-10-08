@@ -42,13 +42,16 @@ public class TeamService {
         this.requests = requests; this.users = users; this.access = access; this.entityManager = entityManager;
         this.events = events;
     }
-    public record TeamView(long id, String name, String description, String joinPolicy) {
+    public record TeamView(long id, String name, String description, String joinPolicy, String role) {
         /**
          * 将团队实体转换为包含公开元数据及加入策略的视图。
          *
          * @param t 团队实体
          */
-        static TeamView of(Team t) { return new TeamView(t.getId(), t.getName(), t.getDescription(), t.getJoinPolicy()); }
+        static TeamView of(Team t) { return of(t, null); }
+        static TeamView of(Team t, String role) {
+            return new TeamView(t.getId(), t.getName(), t.getDescription(), t.getJoinPolicy(), role);
+        }
     }
     public record MemberView(long userId, String username, String displayName, String role) {}
     public record RequestView(long id, long userId, String username, String status, Instant createdAt) {}
@@ -70,7 +73,7 @@ public class TeamService {
         Team team = teams.saveAndFlush(new Team(name.trim(), trim(description)));
         members.save(new TeamMember(team.getId(), userId, "OWNER"));
         bump(userId);
-        return TeamView.of(team);
+        return TeamView.of(team, "OWNER");
     }
     /**
      * 分页查询当前用户作为有效成员加入的有效团队。
@@ -82,7 +85,9 @@ public class TeamService {
     @Transactional(readOnly = true)
     public Page<TeamView> mine(long userId, int page, int size) {
         requireUser(userId);
-        return teams.mine(userId, PageRequest.of(page, size)).map(TeamView::of);
+        var roles = members.findByUserIdAndStatus(userId, "ACTIVE").stream()
+                .collect(java.util.stream.Collectors.toMap(TeamMember::getTeamId, TeamMember::getRole));
+        return teams.mine(userId, PageRequest.of(page, size)).map(team -> TeamView.of(team, roles.get(team.getId())));
     }
     /**
      * 按名称分页搜索有效且允许申请加入的团队。
@@ -104,8 +109,17 @@ public class TeamService {
      */
     @Transactional(readOnly = true)
     public TeamView get(long teamId, long userId) {
-        access.member(teamId, userId);
-        return TeamView.of(teams.findById(teamId).orElseThrow());
+        var member = access.member(teamId, userId);
+        return TeamView.of(teams.findById(teamId).orElseThrow(), member.getRole());
+    }
+    /** 锁定团队并校验所有者身份，更新名称和可清空的描述。 */
+    @Transactional
+    public TeamView update(long teamId, long userId, String name, String description) {
+        Team team = lockTeam(teamId);
+        access.owner(teamId, userId);
+        team.updateMetadata(name.trim(), trim(description));
+        teams.saveAndFlush(team);
+        return TeamView.of(team, "OWNER");
     }
     /**
      * 验证成员权限后查询有效成员，并补充用户公开资料。
@@ -134,7 +148,7 @@ public class TeamService {
         access.owner(teamId, userId);
         if (!"REQUEST".equals(policy) && !"INVITE_ONLY".equals(policy)) throw new IllegalArgumentException("加入策略无效");
         team.setJoinPolicy(policy);
-        return TeamView.of(team);
+        return TeamView.of(team, "OWNER");
     }
     /**
      * 在团队锁内检查加入策略和成员状态，新建或重新开启加入申请；待处理申请直接复用。
@@ -335,7 +349,7 @@ public class TeamService {
         if (members.findByTeamIdAndUserIdAndStatus(team.getId(), userId, "ACTIVE").isPresent()) throw gone();
         activate(team.getId(), userId);
         invitation.consume();
-        return TeamView.of(team);
+        return TeamView.of(team, "MEMBER");
     }
     /**
      * 锁定团队并刷新邀请状态，确认受邀人及有效期后拒绝邀请。

@@ -38,6 +38,11 @@ public class Team {
      * @param policy 加入策略
      */
     public void setJoinPolicy(String policy) { joinPolicy = policy; }
+    /** 更新名称及描述，输入规范化由业务服务负责。 */
+    public void updateMetadata(String name, String description) {
+        this.name = name;
+        this.description = description;
+    }
     /**
      * 返回记录 ID。
      */

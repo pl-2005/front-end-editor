@@ -3,6 +3,7 @@ export interface Team {
   name: string
   description: string | null
   joinPolicy: 'REQUEST' | 'INVITE_ONLY'
+  role?: 'OWNER' | 'MEMBER' | null
 }
 export interface Member {
   userId: number

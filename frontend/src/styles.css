@@ -251,6 +251,13 @@ body {
 .v2-project-table {
   margin-top: 16px;
 }
+.v2-project-table .v2-project-table-actions {
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+.v2-project-table-actions .ant-btn {
+  flex-shrink: 0;
+}
 .v2-project-table-description {
   display: block;
   overflow: hidden;

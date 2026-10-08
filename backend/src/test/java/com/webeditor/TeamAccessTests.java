@@ -31,6 +31,40 @@ class TeamAccessTests {
     @Autowired MockMvc mvc;
     @MockitoBean AuthRateLimiter limiter;
 
+    @Test void onlyOwnerCanEditTeamMetadataAndBlankDescriptionCanBeCleared() throws Exception {
+        AppUser owner = user("owner");
+        AppUser member = user("member");
+        AppUser stranger = user("stranger");
+        long teamId = teams.create(owner.getId(), "原团队", "原描述").id();
+        teams.decide(teamId, owner.getId(), teams.request(teamId, member.getId()).id(), true);
+        mvc.perform(put("/api/teams/" + teamId).header("Authorization", bearer(member))
+                .contentType("application/json").content("{\"name\":\"非法修改\",\"description\":null}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/api/teams/" + teamId).header("Authorization", bearer(stranger))
+                .contentType("application/json").content("{\"name\":\"非法修改\",\"description\":null}"))
+                .andExpect(status().isNotFound());
+        assertThat(teams.get(teamId, owner.getId()).name()).isEqualTo("原团队");
+        mvc.perform(put("/api/teams/" + teamId).header("Authorization", bearer(owner))
+                .contentType("application/json").content("{\"name\":\" 新团队 \",\"description\":\" 新描述 \"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.name").value("新团队"))
+                .andExpect(jsonPath("$.data.description").value("新描述"))
+                .andExpect(jsonPath("$.data.role").value("OWNER"));
+        mvc.perform(put("/api/teams/" + teamId).header("Authorization", bearer(owner))
+                .contentType("application/json").content("{\"name\":\"   \",\"description\":null}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(put("/api/teams/" + teamId).header("Authorization", bearer(owner))
+                .contentType("application/json").content("{\"name\":\"新团队\",\"description\":\"" + "x".repeat(501) + "\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(put("/api/teams/" + teamId).header("Authorization", bearer(owner))
+                .contentType("application/json").content("{\"name\":\"新团队\",\"description\":\"   \"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.description").isEmpty());
+        assertThat(teams.get(teamId, owner.getId()).description()).isNull();
+        assertThat(teams.mine(owner.getId(), 0, 100).getContent())
+                .anySatisfy(team -> { assertThat(team.id()).isEqualTo(teamId); assertThat(team.role()).isEqualTo("OWNER"); });
+        assertThat(teams.mine(member.getId(), 0, 100).getContent())
+                .anySatisfy(team -> { assertThat(team.id()).isEqualTo(teamId); assertThat(team.role()).isEqualTo("MEMBER"); });
+    }
+
     @Test void usernameInvitationIsVisibleOnlyToRecipientAndConsumedOnce() throws Exception {
         AppUser owner = user("owner");
         AppUser member = user("member");

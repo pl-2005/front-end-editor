@@ -64,6 +64,77 @@ describe('V2 routes', () => {
     expect(screen.getByRole('button', { name: '返回上一级' }).hasAttribute('disabled')).toBe(true)
   })
 
+  it.each(['/teams', '/teams/9'])('edits team name and description from %s', async (route) => {
+    window.history.replaceState(null, '', route)
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    let team = {
+      id: 9,
+      name: 'Original team',
+      description: '已有描述' as string | null,
+      joinPolicy: 'REQUEST',
+      role: 'OWNER',
+    }
+    const fetcher = vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/api/teams?size=100') return Promise.resolve(ok({ content: [team] }))
+      if (path === '/api/teams/9' && init?.method === 'PUT') {
+        team = { ...team, ...JSON.parse(String(init.body)) }
+        return Promise.resolve(ok(team))
+      }
+      if (path === '/api/teams/9') return Promise.resolve(ok(team))
+      if (path === '/api/teams/9/members')
+        return Promise.resolve(ok([{ userId: 4, role: 'OWNER' }]))
+      if (path === '/api/teams/9/projects?size=100') return Promise.resolve(ok({ items: [] }))
+      if (path === '/api/teams/9/join-requests' || path === '/api/teams/9/invitations')
+        return Promise.resolve(ok([]))
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetcher)
+    render(<App />)
+    await screen.findByText('Original team')
+    fireEvent.click(screen.getByRole('button', { name: '编辑', hidden: true }))
+    expect(window.location.pathname).toBe(route)
+    expect((screen.getByLabelText('团队名称') as HTMLInputElement).value).toBe('Original team')
+    expect((screen.getByLabelText('团队描述') as HTMLTextAreaElement).value).toBe('已有描述')
+    fireEvent.click(screen.getByRole('button', { name: '取消', hidden: true }))
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '编辑', hidden: true }))
+    fireEvent.change(screen.getByLabelText('团队名称'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }))
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    fireEvent.change(screen.getByLabelText('团队名称'), { target: { value: ' New team ' } })
+    fireEvent.change(screen.getByLabelText('团队描述'), { target: { value: ' 新描述 ' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }))
+    await screen.findByText('New team')
+    expect(team.description).toBe('新描述')
+    expect(team.joinPolicy).toBe('REQUEST')
+    fireEvent.click(screen.getByRole('button', { name: '编辑', hidden: true }))
+    fireEvent.change(screen.getByLabelText('团队描述'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存', hidden: true }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { hidden: true })).toBeNull())
+    expect(team.description).toBeNull()
+    expect(window.location.pathname).toBe(route)
+  })
+
+  it.each(['/teams', '/teams/9'])('hides team editing for members on %s', async (route) => {
+    window.history.replaceState(null, '', route)
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    const team = { id: 9, name: 'Member team', role: 'MEMBER' }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string) => {
+        if (path === '/api/teams?size=100') return Promise.resolve(ok({ content: [team] }))
+        if (path === '/api/teams/9') return Promise.resolve(ok(team))
+        if (path === '/api/teams/9/members')
+          return Promise.resolve(ok([{ userId: 4, role: 'MEMBER' }]))
+        if (path === '/api/teams/9/projects?size=100') return Promise.resolve(ok({ items: [] }))
+        throw new Error(`Unexpected request: ${path}`)
+      }),
+    )
+    render(<App />)
+    await screen.findByText('Member team')
+    expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
+  })
+
   it('manages projects from the table without triggering row navigation', async () => {
     window.history.replaceState(null, '', '/teams/9')
     setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
