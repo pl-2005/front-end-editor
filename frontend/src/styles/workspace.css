@@ -504,12 +504,23 @@ kbd {
   height: 100% !important;
 }
 .sandpack-layout .sp-preview-actions button,
-.console-panel .sp-console-actions button {
+.console-panel .sp-console-actions button,
+.v2-preview-pane .sp-preview-actions button,
+.v2-console .sp-console-actions button {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 .sandpack-layout .sp-preview-actions button svg,
 .console-panel .sp-console-actions button svg {
   pointer-events: none;
+}
+.v2-preview-pane .preview-restart-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
 }
 .sandpack-layout .sp-preview-actions button::after,
 .console-panel .sp-console-actions button::after {

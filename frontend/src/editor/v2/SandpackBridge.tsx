@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -9,6 +10,7 @@ import {
 } from 'react'
 import { SandpackPreview, SandpackProvider, useSandpack } from '@codesandbox/sandpack-react'
 import { PreviewConsole } from '../PreviewConsole'
+import { RestartPreviewButton } from '../RestartPreviewButton'
 import type { CollaborationSession } from '../../collaboration/session'
 import type { ProjectFiles } from '../../types/project'
 import { previewProjection } from './projection'
@@ -34,7 +36,17 @@ function PreviewBoundary({ children }: { children: ReactNode }) {
     </div>
   )
 }
-function Projection({ session, entry }: { session: CollaborationSession; entry: string }) {
+function Projection({
+  session,
+  entry,
+  initialFiles,
+  onRestart,
+}: {
+  session: CollaborationSession
+  entry: string
+  initialFiles: ProjectFiles
+  onRestart: () => void
+}) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot)
   const { sandpack, listen, dispatch } = useSandpack()
   const runtime = useRef(sandpack)
@@ -50,8 +62,9 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
     let debounce: ReturnType<typeof setTimeout> | undefined,
       deadline: ReturnType<typeof setTimeout> | undefined,
       stopped = false
-    let refresh: ReturnType<typeof setTimeout> | undefined
-    const flush = (force = false) => {
+    let refresh: ReturnType<typeof setTimeout> | undefined,
+      needsRecovery = false
+    const flush = (replay = false) => {
       clearTimeout(debounce)
       clearTimeout(deadline)
       debounce = undefined
@@ -64,17 +77,21 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
           if (!Object.hasOwn(next.files, path)) current.deleteFile(path, false)
         const changed: ProjectFiles = Object.fromEntries(
           Object.entries(next.files).filter(([path, f]) => {
-            const value = current.files[path]
-            return force || !value || (typeof value === 'string' ? value : value.code) !== f.code
+            // During startup Sandpack may accept state changes without delivering
+            // them. Compare the ready replay with the actual startup snapshot.
+            const value = replay ? initialFiles[path] : current.files[path]
+            return !value || (typeof value === 'string' ? value : value.code) !== f.code
           }),
         )
         if (Object.keys(changed).length) current.updateFile(changed)
-        // An HTML page with no working module can miss Vite's reload messages.
-        // Refresh after Sandpack's delayed file delivery to recover that page.
-        if (Object.hasOwn(changed, entry)) {
+        // Vite's HTML error response can lose its HMR connection. Only recover
+        // that case; normal HTML edits already reload through Vite.
+        if (needsRecovery && Object.hasOwn(changed, entry)) {
           clearTimeout(refresh)
           refresh = setTimeout(() => {
-            if (!stopped) send.current({ type: 'refresh' })
+            if (stopped) return
+            needsRecovery = false
+            send.current({ type: 'refresh' })
           }, 750)
         }
         setError('')
@@ -83,6 +100,7 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
       }
     }
     const schedule = () => {
+      clearTimeout(refresh)
       clearTimeout(debounce)
       debounce = setTimeout(flush, 300)
       deadline ??= setTimeout(flush, 1000)
@@ -92,6 +110,14 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
     let readyTask: ReturnType<typeof setTimeout> | undefined,
       initialized = false
     const unsubscribe = listener.current((message) => {
+      if (
+        message.type === 'stdout' &&
+        typeof message.payload.data === 'string' &&
+        /Unable to parse HTML/i.test(message.payload.data) &&
+        message.payload.data.includes(entry)
+      ) {
+        needsRecovery = true
+      }
       if (message.type === 'done' && !initialized) {
         initialized = true
         clearTimeout(readyTask)
@@ -109,7 +135,7 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
       unsubscribe()
       session.doc.off('update', schedule)
     }
-  }, [session, entry])
+  }, [session, entry, initialFiles])
   useFeedback({
     error,
     notice:
@@ -123,10 +149,12 @@ function Projection({ session, entry }: { session: CollaborationSession; entry: 
         startRoute={entry === '/index.html' ? '/' : entry}
         showOpenInCodeSandbox={false}
         showRefreshButton
+        showRestartButton={false}
+        actionsChildren={<RestartPreviewButton onRestart={onRestart} />}
       />
       <details className="v2-console">
         <summary>控制台</summary>
-        <PreviewConsole />
+        <PreviewConsole onRestart={onRestart} />
       </details>
     </div>
   )
@@ -140,22 +168,29 @@ export function SandpackBridge({
   entry: string
   structureKey: string
 }) {
+  const [runtimeGeneration, setRuntimeGeneration] = useState(0)
+  const restart = useCallback(() => setRuntimeGeneration((generation) => generation + 1), [])
   const initial = useMemo(
-    () => ({ ...previewProjection(session), entry, structureKey }),
-    [session, entry, structureKey],
+    () => ({ ...previewProjection(session), entry, structureKey, runtimeGeneration }),
+    [session, entry, structureKey, runtimeGeneration],
   )
   const customSetup = useMemo(() => ({ entry }), [entry])
   return (
     <SandpackProvider
-      key={`${session.identity.projectId}:${session.identity.epoch}:${entry}:${structureKey}`}
+      key={`${session.identity.projectId}:${session.identity.epoch}:${entry}:${structureKey}:${runtimeGeneration}`}
       template="vite"
       files={initial.files}
       customSetup={customSetup}
-      options={{ autorun: true, recompileMode: 'delayed', recompileDelay: 300 }}
+      options={{ autorun: true, recompileMode: 'immediate' }}
       theme="light"
     >
       <PreviewBoundary>
-        <Projection session={session} entry={entry} />
+        <Projection
+          session={session}
+          entry={entry}
+          initialFiles={initial.files}
+          onRestart={restart}
+        />
       </PreviewBoundary>
     </SandpackProvider>
   )

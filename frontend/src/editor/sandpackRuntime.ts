@@ -1,6 +1,6 @@
 import type { ProjectFiles } from '../types/project'
 
-const VITE_DEV_COMMAND = 'vite'
+const VITE_DEV_COMMAND = 'vite --clearScreen false'
 const VITE_VERSION = '4.1.4'
 const ESBUILD_WASM_VERSION = '0.17.12'
 
@@ -27,7 +27,7 @@ function ensureUtf8Charset(code: string): string {
 }
 
 /**
- * 为缺少兼容启动命令的 package.json 补入 Vite 命令及运行依赖，解析失败时保留原内容。
+ * 补齐 Vite 运行依赖并禁用 Nodebox 不支持的终端清屏，解析失败时保留原内容。
  *
  * @param code 待处理的文件文本
  */
@@ -41,7 +41,20 @@ function ensureViteDevCommand(code: string): string {
     const hasCompatibleCommand =
       (typeof scripts.dev === 'string' && scripts.dev !== 'vite --host 0.0.0.0') ||
       typeof scripts.start === 'string'
-    if (hasCompatibleCommand) return code
+    if (hasCompatibleCommand) {
+      const runtimeScripts = { ...scripts }
+      for (const name of ['dev', 'start']) {
+        const command = scripts[name]
+        if (typeof command !== 'string' || !/^vite(?:\s|$)/.test(command)) continue
+        // Only adjust direct Vite commands; leave user-managed shell scripts intact.
+        if (/[;&|\n\r]/.test(command)) continue
+        runtimeScripts[name] = /--clearScreen(?:\s|=)/.test(command)
+          ? command.replace(/--clearScreen(?:\s+|=)(true|false)\b/g, '--clearScreen false')
+          : `${command} --clearScreen false`
+      }
+      if (runtimeScripts.dev === scripts.dev && runtimeScripts.start === scripts.start) return code
+      return JSON.stringify({ ...packageJson, scripts: runtimeScripts }, null, 2)
+    }
 
     const devDependencies =
       typeof packageJson.devDependencies === 'object' && packageJson.devDependencies !== null

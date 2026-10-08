@@ -27,11 +27,11 @@ describe('prepareSandpackFiles', () => {
     }
 
     const packageJson = JSON.parse(prepareSandpackFiles(files)['/package.json']?.code ?? '{}')
-    expect(packageJson.scripts.dev).toBe('vite')
+    expect(packageJson.scripts.dev).toBe('vite --clearScreen false')
     expect(packageJson.devDependencies.vite).toBe('4.1.4')
   })
 
-  it('preserves a user-managed package file', () => {
+  it('disables terminal clearing without changing user-managed Vite dependencies', () => {
     const files = {
       '/index.js': { code: '' },
       '/package.json': {
@@ -39,7 +39,13 @@ describe('prepareSandpackFiles', () => {
       },
     }
 
-    expect(prepareSandpackFiles(files)).toBe(files)
+    const prepared = prepareSandpackFiles(files)
+    const packageJson = JSON.parse(prepared['/package.json'].code)
+    expect(packageJson.scripts.dev).toBe('vite --clearScreen false')
+    expect(packageJson.devDependencies.vite).toBe('^7.0.0')
+    expect(JSON.parse(files['/package.json'].code).scripts.dev).toBe('vite')
+    expect(prepareSandpackFiles(prepared)).toBe(prepared)
+    expect(restoreUnchangedRuntimeFiles(prepared, files)).toEqual(files)
   })
 
   it('migrates the unsupported Nodebox host command', () => {
@@ -53,7 +59,24 @@ describe('prepareSandpackFiles', () => {
     }
 
     const packageJson = JSON.parse(prepareSandpackFiles(files)['/package.json']?.code ?? '{}')
-    expect(packageJson.scripts.dev).toBe('vite')
+    expect(packageJson.scripts.dev).toBe('vite --clearScreen false')
+  })
+
+  it.each([
+    ['vite --port 3000', 'vite --port 3000 --clearScreen false'],
+    ['vite --clearScreen true', 'vite --clearScreen false'],
+    ['vite --clearScreen=false', 'vite --clearScreen false'],
+    ['vite --clearScreen false', 'vite --clearScreen false'],
+    ['node server.js', 'node server.js'],
+    ['vite build && node server.js', 'vite build && node server.js'],
+  ])('prepares dev and start commands safely: %s', (command, expected) => {
+    for (const name of ['dev', 'start']) {
+      const files = {
+        '/package.json': { code: JSON.stringify({ scripts: { [name]: command } }) },
+      }
+      const prepared = prepareSandpackFiles(files)
+      expect(JSON.parse(prepared['/package.json'].code).scripts[name]).toBe(expected)
+    }
   })
 
   it('keeps optional chaining and local CSS imports intact for Vite', () => {

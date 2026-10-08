@@ -1,10 +1,11 @@
 import type { ReactElement, ReactNode } from 'react'
-import { act, render as renderUI } from '@testing-library/react'
+import { act, fireEvent, render as renderUI, screen } from '@testing-library/react'
 import { AppTheme } from '../../ui/AppTheme'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import type { CollaborationSession } from '../../collaboration/session'
 import { SandpackBridge } from './SandpackBridge'
+import { previewProjection } from './projection'
 
 const render = (ui: ReactElement) => renderUI(ui, { wrapper: AppTheme })
 
@@ -15,14 +16,35 @@ const runtime = vi.hoisted(() => {
     updateFile: vi.fn((next: typeof files) => Object.assign(files, next)),
     deleteFile: vi.fn(),
     dispatch: vi.fn(),
-    listener: undefined as undefined | ((message: { type: string }) => void),
+    listener: undefined as
+      undefined | ((message: { type: string; payload?: { data: string; type: string } }) => void),
     unsubscribe: vi.fn(),
   }
 })
 vi.mock('@codesandbox/sandpack-react', () => ({
-  SandpackProvider: ({ children }: { children: ReactNode }) => children,
-  SandpackPreview: () => <iframe title="Sandpack Preview" />,
-  SandpackConsole: () => <div>Console</div>,
+  SandpackProvider: ({ children }: { children: ReactNode }) => {
+    return children
+  },
+  SandpackPreview: ({
+    actionsChildren,
+    showRestartButton,
+  }: {
+    actionsChildren: ReactNode
+    showRestartButton?: boolean
+  }) => (
+    <div>
+      <iframe title="Sandpack Preview" />
+      {showRestartButton !== false ? (
+        <button onClick={() => runtime.dispatch({ type: 'shell/restart' })}>Restart script</button>
+      ) : (
+        actionsChildren
+      )}
+    </div>
+  ),
+  SandpackConsole: ({ actionsChildren }: { actionsChildren: ReactNode }) => (
+    <div>Console{actionsChildren}</div>
+  ),
+  RestartIcon: () => <span />,
   useSandpack: () => ({
     sandpack: runtime,
     dispatch: runtime.dispatch,
@@ -64,6 +86,32 @@ afterEach(() => {
   Object.keys(runtime.files).forEach((k) => delete runtime.files[k])
 })
 describe('Sandpack document projection lifecycle', () => {
+  it('recreates the preview from the latest document on restart without changing its source', () => {
+    vi.useFakeTimers()
+    const f = fixture(),
+      view = render(
+        <SandpackBridge
+          session={f as unknown as CollaborationSession}
+          entry="/index.html"
+          structureKey="initial"
+        />,
+      )
+    const frame = screen.getByTitle('Sandpack Preview')
+    act(() => f.text.insert(0, '<!-- latest -->'))
+    const source = f.text.toString()
+    fireEvent.click(screen.getAllByRole('button', { name: /重启预览|Restart script/ })[0])
+    expect(screen.getByTitle('Sandpack Preview')).not.toBe(frame)
+    expect(runtime.dispatch).not.toHaveBeenCalledWith({ type: 'shell/restart' })
+    expect(runtime.updateFile.mock.calls.at(-1)?.[0]['/index.html'].code).toContain('latest')
+    expect(f.text.toString()).toBe(source)
+    expect(f.doc.getMap('files').size).toBe(1)
+    const restartedFrame = screen.getByTitle('Sandpack Preview')
+    fireEvent.click(screen.getAllByRole('button', { name: '重启预览' })[1])
+    expect(screen.getByTitle('Sandpack Preview')).not.toBe(restartedFrame)
+    expect(f.text.toString()).toBe(source)
+    view.unmount()
+    f.doc.destroy()
+  })
   it('restricts preview navigation and referrer disclosure, including dynamically added runtime frames', async () => {
     const f = fixture(),
       view = render(
@@ -86,7 +134,7 @@ describe('Sandpack document projection lifecycle', () => {
     view.unmount()
     f.doc.destroy()
   })
-  it('replays the latest document once after initialization and refreshes repaired HTML', () => {
+  it('replays only changed files once after initialization without forcing another refresh', () => {
     vi.useFakeTimers()
     const f = fixture(),
       view = render(
@@ -109,13 +157,101 @@ describe('Sandpack document projection lifecycle', () => {
       vi.advanceTimersByTime(0)
     })
     expect(runtime.updateFile.mock.calls[0][0]['/index.html'].code).toContain('Repaired')
+    expect(Object.keys(runtime.updateFile.mock.calls[0][0])).toEqual(['/index.html'])
     act(() => {
       runtime.listener!({ type: 'done' })
       vi.advanceTimersByTime(750)
     })
     expect(runtime.updateFile).toHaveBeenCalledTimes(1)
-    expect(runtime.dispatch).toHaveBeenCalledWith({ type: 'refresh' })
+    expect(runtime.dispatch).not.toHaveBeenCalledWith({ type: 'refresh' })
     expect(f.doc.getMap('files').size).toBe(1)
+    view.unmount()
+    f.doc.destroy()
+  })
+  it('does not resend an unchanged startup document', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    Object.assign(runtime.files, previewProjection(f).files)
+    const view = render(
+      <SandpackBridge
+        session={f as unknown as CollaborationSession}
+        entry="/index.html"
+        structureKey="initial"
+      />,
+    )
+    act(() => {
+      runtime.listener!({ type: 'done' })
+      vi.advanceTimersByTime(2000)
+    })
+    expect(runtime.updateFile).not.toHaveBeenCalled()
+    expect(runtime.dispatch).not.toHaveBeenCalled()
+    view.unmount()
+    f.doc.destroy()
+  })
+  it('refreshes only when an HTML parse error has disconnected hot updates', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    Object.assign(runtime.files, previewProjection(f).files)
+    const view = render(
+      <SandpackBridge
+        session={f as unknown as CollaborationSession}
+        entry="/index.html"
+        structureKey="initial"
+      />,
+    )
+    act(() => {
+      runtime.listener!({ type: 'done' })
+      vi.advanceTimersByTime(0)
+      runtime.listener!({
+        type: 'stdout',
+        payload: {
+          type: 'err',
+          data: 'Internal server error: Unable to parse HTML; at /nodebox/index.html:1:1',
+        },
+      })
+      f.text.insert(0, '<!-- repaired -->')
+      vi.advanceTimersByTime(300)
+    })
+    expect(runtime.dispatch).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(750))
+    expect(runtime.dispatch).toHaveBeenCalledExactlyOnceWith({ type: 'refresh' })
+    runtime.dispatch.mockClear()
+    act(() => {
+      f.text.insert(0, '<!-- normal edit -->')
+      vi.advanceTimersByTime(2000)
+    })
+    expect(runtime.dispatch).not.toHaveBeenCalled()
+    view.unmount()
+    f.doc.destroy()
+  })
+  it('coalesces rapid HTML edits into one update while preserving the preview frame', () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    Object.assign(runtime.files, previewProjection(f).files)
+    const view = render(
+      <SandpackBridge
+        session={f as unknown as CollaborationSession}
+        entry="/index.html"
+        structureKey="initial"
+      />,
+    )
+    const frame = screen.getByTitle('Sandpack Preview')
+    act(() => {
+      runtime.listener!({ type: 'done' })
+      vi.advanceTimersByTime(0)
+    })
+    runtime.updateFile.mockClear()
+    act(() => f.text.insert(0, '<!-- first -->'))
+    act(() => vi.advanceTimersByTime(200))
+    act(() => f.text.insert(0, '<!-- latest -->'))
+    act(() => vi.advanceTimersByTime(299))
+    expect(runtime.updateFile).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(1))
+    expect(runtime.updateFile).toHaveBeenCalledTimes(1)
+    expect(runtime.updateFile.mock.calls[0][0]['/index.html'].code).toContain('latest')
+    act(() => vi.advanceTimersByTime(2000))
+    expect(runtime.dispatch).not.toHaveBeenCalled()
+    expect(screen.getByTitle('Sandpack Preview')).toBe(frame)
     view.unmount()
     f.doc.destroy()
   })
