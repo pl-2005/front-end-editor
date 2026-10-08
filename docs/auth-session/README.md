@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | [前端认证](../../frontend/src/api/auth.ts) | 凭据全部在内存，刷新依赖内存 refreshToken；任何刷新失败清理身份 | 删除前端 refreshToken；增加启动恢复、状态机、错误分类及会话协调 |
 | [前端请求](../../frontend/src/api/client.ts) | Bearer + credentials: omit；刷新异常会清理身份 | 保留业务请求策略，区分刷新暂时失败和确定失效，最多重试业务请求一次 |
-| [路由](../../frontend/src/V2App.tsx) | user=null 立即跳登录 | 恢复完成前阻止受保护页面挂载和重定向 |
+| [路由与认证守卫](../../frontend/src/app/AppRoutes.tsx)（[RequireAuth](../../frontend/src/app/RequireAuth.tsx)） | user=null 立即跳登录 | 恢复完成前阻止受保护页面挂载和重定向 |
 | [前端类型](../../frontend/src/types/auth.ts) | Credentials 含 refreshToken | 浏览器类型仅包含 user、accessToken、expiresIn |
 | [协作会话](../../frontend/src/collaboration/session.ts)与[离线缓存](../../frontend/src/collaboration/offline.ts) | 身份代次变化触发 forbid 和缓存清理 | 临时认证故障保留身份代次及离线队列；确定失效才走撤权清理 |
 | [登录过滤器](../../backend/src/main/java/com/webeditor/common/security/JsonAuthenticationFilter.java) | 直接序列化 AuthService.Credentials | 写入 Cookie，序列化独立的浏览器响应 DTO |

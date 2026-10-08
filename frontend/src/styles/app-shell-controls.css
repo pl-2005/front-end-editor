@@ -1,0 +1,74 @@
+.v2-topbar.ant-layout-header {
+  height: auto;
+  min-height: 72px;
+  line-height: normal;
+  background: var(--surface);
+  padding-block: 10px;
+  gap: 24px;
+}
+.v2-topbar-content:not([hidden]) {
+  display: contents;
+}
+.v2-topbar-content[hidden] {
+  display: none;
+}
+.v2-topbar-toggle {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.v2-topbar.ant-layout-header.v2-topbar-collapsed {
+  min-height: 32px;
+  padding-block: 0;
+  gap: 0;
+}
+.v2-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.v2-brand > .anticon {
+  font-size: 25px;
+}
+.v2-topbar nav {
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+.v2-topbar .ant-menu {
+  border-bottom: 0;
+  min-width: 0;
+  background: transparent;
+}
+.v2-topbar .ant-menu-horizontal {
+  line-height: 32px;
+}
+.v2-topbar .ant-menu-horizontal > .ant-menu-item {
+  margin-inline: 4px;
+  line-height: 32px;
+}
+.v2-topbar .ant-menu-item a {
+  color: inherit;
+}
+.v2-topbar .ant-menu-item-selected {
+  font-weight: 600;
+  box-shadow:
+    0 6px 16px #2563eb26,
+    0 2px 6px #2563eb1a,
+    inset 0 0 0 1px #2563eb14;
+}
+.v2-topbar .ant-menu-item-selected a,
+.v2-topbar .ant-menu-item-selected a:hover {
+  color: var(--accent);
+}
+.v2-account {
+  flex-shrink: 0;
+}
+.v2-account > span {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v2-content.ant-layout-content {
+  width: 100%;
+}

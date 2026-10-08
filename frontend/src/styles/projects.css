@@ -1,0 +1,24 @@
+.v2-project-section {
+  gap: 12px;
+  min-width: 0;
+}
+.v2-project-section > .v2-panel {
+  padding: 10px 12px;
+}
+.v2-project-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  min-width: 0;
+}
+.v2-project-bar h1 {
+  margin: 0;
+  min-width: 0;
+  font-size: clamp(24px, 3vw, 30px);
+  overflow-wrap: anywhere;
+}
+.v2-project-bar > .v2-actions {
+  margin-left: auto;
+  justify-content: flex-end;
+}

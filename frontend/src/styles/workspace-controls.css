@@ -1,0 +1,47 @@
+.v2-workspace-status .ant-tag {
+  white-space: normal;
+  margin: 0;
+  align-self: center;
+}
+.v2-workspace-toolbar {
+  padding: 12px 16px;
+}
+.v2-workspace-toolbar .ant-btn[aria-pressed='true'] {
+  color: var(--accent);
+}
+.v2-file-panel .ant-btn > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.v2-file-panel .v2-add-file.ant-btn {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  border-radius: 50%;
+}
+.v2-entry-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 5px #22c55e66;
+  animation: v2-entry-blink 1.6s ease-in-out infinite;
+}
+@keyframes v2-entry-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-entry-dot {
+    animation: none;
+  }
+}

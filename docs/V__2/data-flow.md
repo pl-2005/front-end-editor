@@ -8,6 +8,14 @@
 
 有效成员创建项目时，Spring 保留 INITIALIZING 项目 ID，通过内部 HMAC 请求受信编码服务生成模板 Y.Doc。核对身份、schema、hash 和大小后，事务外上传 MinIO，再原子激活项目与 generation=1 指针。初始化失败记录不进入项目列表/详情；客户端用 `X-Initializing-Project` 重试同一个 ID。复制先 flush 源房间，再从当前权威文档生成新的项目身份；flush 失败不创建副本。
 
+## 页面查询与元数据操作
+
+`AppRoutes/RequireAuth` 按既有内存身份分流，TeamRoute/ProjectRoute 用资源 ID 的 key 隔离页面状态。团队基础数据并行加载，确认当前用户为所有者后才加载申请和邀请；每次 reload 取消并使旧代次失效，迟到基础数据、管理响应及错误不会覆盖当前快照。列表与搜索保留独立的身份、查询及分页标记。
+
+页面唯一 `useTask` 经团队/项目执行器注入 `useProjectActions`，API 操作和成功后刷新都 await 在任务内，所有同页业务按钮保持锁定。元数据对话框只收集名称/描述；创建团队保留原始字符串与空描述，项目创建由调用方转换为空值，编辑提交规范化值。失败保留草稿，取消不请求。
+
+更新 API 返回项目摘要，详情 Hook 合并到现有详情并保留 collaboration，后续编辑/删除使用最新 stateVersion 的 If-Match。名称/描述更新只改变工作区 props；用户、项目或 epoch 改变才替换会话。详情头部导出入口由当前工作区 portal 提供，团队列表的动态导出仍走独立会话流程。
+
 ## 打开与编辑
 
 ```mermaid

@@ -1,6 +1,6 @@
 # V2 当前架构
 
-截至 2026-10-07，步骤 01–11 已开发完成。本文描述当前模块与数据边界；阶段记录见 [V2 索引](README.md)，业务决策见 [总方案](00-overall-plan.md)。
+截至 2026-10-08，步骤 01–11 及前端职责拆分已实施。本文描述当前模块与数据边界；阶段记录见 [V2 索引](README.md)，业务决策见 [总方案](00-overall-plan.md)。
 
 ## 系统组成
 
@@ -27,7 +27,10 @@ flowchart LR
 
 | 模块 | 主要实现 | 职责 |
 | --- | --- | --- |
-| 身份与团队 UI | `frontend/src/V2App.tsx`、`api/` | 注册、登录、团队加入与成员管理、项目入口；凭据只在内存 |
+| 应用装配与路由 | `frontend/src/V2App.tsx`、`app/` | 主题、BrowserRouter、认证守卫、带资源 key 的路由入口、公共壳与面包屑 |
+| 身份、团队与邀请 UI | `frontend/src/features/auth/`、`teams/`、`invitations/` | 页面组合与导航、业务数据 Hook、成员/审批/邀请/项目面板；凭据只在内存 |
+| 项目 UI 与共享表单 | `frontend/src/features/projects/`、`ui/Metadata*` | 项目详情、共享操作与按钮、初始化重试、元数据输入；按用户/项目/epoch 挂载工作区 |
+| 请求与异步反馈 | `frontend/src/api/`、`hooks/useTask.ts`、`hooks/useAuthUser.ts`、`ui/errorMessage.ts` | 复用既有 API 与认证订阅；一页一份操作 busy 和错误展示，权限清理由页面执行器处理 |
 | 协作会话 | `frontend/src/collaboration/` | 票据、Provider、授权状态、离线日志、Presence 与持久化确认 |
 | 编辑与预览 | `frontend/src/editor/v2/` | fileId 模型、Monaco 绑定和语言 worker、文件结构命令、Sandpack 投影 |
 | REST 与授权 | `backend/.../identity/`、`team/`、`common/security/` | JWT、刷新、实时成员校验、OWNER 管理边界 |
@@ -36,6 +39,16 @@ flowchart LR
 | 本机与运维工具 | `collaboration/scripts/` | 启动、功能验收、发布打包校验、指标、联合备份与恢复 |
 
 表内 backend 路径相对 `backend/src/main/java/com/webeditor/`。旧 V1 UI 与保存组件保留用于回归测试，不进入 V2 生产编辑链路。
+
+## 前端依赖与生命周期
+
+`V2App → app → features 页面 → 业务 Hook/组件 → api/types/ui`。共享模块不引用页面；项目操作不引用团队页面。`AppShell` 继续由各页面挂载，页面切换重置顶部栏折叠状态。认证守卫只读取内存身份，不增加会话恢复或回跳规则。
+
+`useTeamDetails` 是团队基础与所有者管理数据的一份快照。所有 reload 共用取消控制与递增请求序号；写入基础、管理及错误数据前核对序号和身份。失去所有者身份清空审批/邀请，旧响应不能恢复它们。列表、发现与邀请 Hook 清理请求及防抖，按身份和查询参数识别有效结果。
+
+`useProjectActions` 注入页面 busy 与执行器，编辑、复制、删除、重试及成功后刷新处于同一次任务中。团队执行器保留 USER_NOT_FOUND 例外；详情执行器遇到 403/404 返回团队列表，删除成功则返回所属团队。元数据摘要合并保留 collaboration；工作区继续懒加载，key 为 userId/projectId/epoch。头部提供当前会话导出的 portal 挂载点，列表导出仍动态加载独立流程。
+
+样式从 `styles.css` 按原顺序导入基础、页面、工作区与后续覆盖规则。旧界面、共享交互、Ant Design 控件及响应式规则保留独立分组，避免在归类时改变级联。实施及验证记录见[前端重构](../frontend-refactor/README.md)。
 
 ## 数据归属
 

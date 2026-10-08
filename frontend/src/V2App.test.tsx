@@ -1,13 +1,47 @@
 import { act, fireEvent, render as renderUI, screen, waitFor, within } from '@testing-library/react'
 import { ConfigProvider } from 'antd'
-import type { ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
+import { createPortal } from 'react-dom'
+import type { TeamProjectDetails } from './types/collaboration'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { clearAuth, setCredentials } from './api/auth'
 import { exportTeamProject } from './collaboration/exportTeamProject'
 vi.mock('./collaboration/exportTeamProject', () => ({ exportTeamProject: vi.fn() }))
+const workspace = vi.hoisted(() => ({
+  nextId: 0,
+  mounts: [] as number[],
+  unmounts: [] as number[],
+  props: [] as {
+    project: TeamProjectDetails
+    userId: number
+    teamId: number
+    exportTarget: HTMLSpanElement | null
+  }[],
+}))
 vi.mock('./editor/v2/ProjectWorkspace', () => ({
-  default: () => <section aria-label="项目协作工作区" />,
+  default: function Workspace(props: (typeof workspace.props)[number]) {
+    const [id] = useState(() => ++workspace.nextId)
+    workspace.props.push(props)
+    useEffect(() => {
+      workspace.mounts.push(id)
+      return () => {
+        workspace.unmounts.push(id)
+      }
+    }, [id])
+    return (
+      <section aria-label="项目协作工作区" data-instance={id}>
+        {props.exportTarget
+          ? createPortal(
+              <button aria-label="测试工作区导出" data-instance={id}>
+                导出
+              </button>,
+              props.exportTarget,
+            )
+          : null}
+      </section>
+    )
+  },
 }))
 
 const user = {
@@ -27,6 +61,9 @@ const render = (ui: ReactElement) =>
 
 describe('V2 routes', () => {
   afterEach(() => {
+    workspace.mounts.length = 0
+    workspace.unmounts.length = 0
+    workspace.props.length = 0
     vi.useRealTimers()
     clearAuth()
     vi.unstubAllGlobals()
@@ -213,7 +250,121 @@ describe('V2 routes', () => {
       expect(screen.queryByRole('row', { name: '查看项目 Renamed', hidden: true })).toBeNull(),
     )
     expect(window.location.pathname).toBe('/teams/9')
+  }, 60_000)
+
+  it('keeps all team operations locked until the project copy and its reload finish', async () => {
+    window.history.replaceState(null, '', '/teams/9')
+    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    let finishCopy!: (response: Response) => void
+    let finishReload!: (response: Response) => void
+    const copy = new Promise<Response>((resolve) => {
+      finishCopy = resolve
+    })
+    const reload = new Promise<Response>((resolve) => {
+      finishReload = resolve
+    })
+    let loads = 0
+    const team = { id: 9, name: 'Team', joinPolicy: 'REQUEST' }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string) => {
+        if (path === '/api/teams/9') return ++loads === 1 ? Promise.resolve(ok(team)) : reload
+        if (path === '/api/teams/9/members')
+          return Promise.resolve(
+            ok([
+              { userId: 4, role: 'OWNER', username: 'member' },
+              { userId: 5, role: 'MEMBER', username: 'other' },
+            ]),
+          )
+        if (path === '/api/teams/9/projects?size=100')
+          return Promise.resolve(ok({ items: [{ id: 17, name: 'Original', stateVersion: 1 }] }))
+        if (path === '/api/teams/9/join-requests' || path === '/api/teams/9/invitations')
+          return Promise.resolve(ok([]))
+        if (path === '/api/teams/9/projects/17/copy') return copy
+        throw new Error(`Unexpected request: ${path}`)
+      }),
+    )
+    render(<App />)
+    fireEvent.click(await screen.findByLabelText('复制项目', { selector: 'button' }))
+    await screen.findByLabelText('副本名称', { selector: 'input' })
+    fireEvent.click(screen.getByText('确定', { selector: '.ant-modal button span' }))
+    await waitFor(() =>
+      expect(
+        screen
+          .getByText('移除', { selector: 'button span' })
+          .closest('button')!
+          .hasAttribute('disabled'),
+      ).toBe(true),
+    )
+    expect(
+      screen
+        .getByText('创建项目', { selector: 'button span' })
+        .closest('button')!
+        .hasAttribute('disabled'),
+    ).toBe(true)
+    await act(async () => {
+      finishCopy(ok({ id: 18, name: 'Copy' }))
+    })
+    await waitFor(() => expect(loads).toBe(2))
+    expect(
+      screen
+        .getByText('移除', { selector: 'button span' })
+        .closest('button')!
+        .hasAttribute('disabled'),
+    ).toBe(true)
+    await act(async () => {
+      finishReload(ok(team))
+    })
+    await waitFor(() =>
+      expect(
+        screen
+          .getByText('移除', { selector: 'button span' })
+          .closest('button')!
+          .hasAttribute('disabled'),
+      ).toBe(false),
+    )
   }, 20_000)
+
+  it.each(['/teams/9', '/teams/9/projects/17'])(
+    'cleans up project permission failures through the page executor at %s and reports once',
+    async (route) => {
+      window.history.replaceState(null, '', route)
+      setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((path: string) => {
+          if (path.endsWith('/copy'))
+            return Promise.resolve(
+              new Response(JSON.stringify({ code: 'ACCESS_DENIED', message: '项目操作被拒绝' }), {
+                status: 403,
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            )
+          if (path === '/api/teams?size=100') return Promise.resolve(ok({ content: [] }))
+          if (path === '/api/teams/9') return Promise.resolve(ok({ id: 9, name: 'Team' }))
+          if (path === '/api/teams/9/members')
+            return Promise.resolve(ok([{ userId: 4, role: 'MEMBER' }]))
+          if (path === '/api/teams/9/projects?size=100')
+            return Promise.resolve(ok({ items: [{ id: 17, name: 'Original', stateVersion: 1 }] }))
+          if (path === '/api/teams/9/projects/17')
+            return Promise.resolve(
+              ok({ id: 17, name: 'Original', stateVersion: 1, collaboration: { epoch: 1 } }),
+            )
+          throw new Error(`Unexpected request: ${path}`)
+        }),
+      )
+      render(<App />)
+      fireEvent.click(await screen.findByLabelText('复制项目', { selector: 'button' }))
+      await screen.findByLabelText('副本名称', { selector: 'input' })
+      fireEvent.click(screen.getByText('确定', { selector: '.ant-modal button span' }))
+      await screen.findByRole('heading', { name: '我的团队' })
+      expect(window.location.pathname).toBe('/teams')
+      expect(screen.queryByRole('row', { name: '查看项目 Original' })).toBeNull()
+      expect(screen.queryByRole('button', { name: '测试工作区导出' })).toBeNull()
+      expect(await screen.findAllByText('项目操作被拒绝')).toHaveLength(1)
+    },
+    20_000,
+  )
 
   it.each(['click', 'keyboard'])('opens a project using a table row %s', async (method) => {
     window.history.replaceState(null, '', '/teams/9')
@@ -384,7 +535,13 @@ describe('V2 routes', () => {
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
       if (path === '/api/teams/9/projects/17' && init?.method === 'PUT') {
         return Promise.resolve(
-          ok({ ...project, name: 'Renamed', description: '更新的描述', stateVersion: 2 }),
+          ok({
+            id: project.id,
+            template: project.template,
+            name: 'Renamed',
+            description: '更新的描述',
+            stateVersion: 2,
+          }),
         )
       }
       if (path === '/api/teams/9/projects/17') return Promise.resolve(ok(project))
@@ -393,6 +550,10 @@ describe('V2 routes', () => {
     vi.stubGlobal('fetch', fetcher)
     render(<App />)
     await screen.findByRole('heading', { name: 'Original' })
+    await screen.findByRole('button', { name: '测试工作区导出' })
+    const mounts = [...workspace.mounts]
+    const unmounts = [...workspace.unmounts]
+    const exportButton = screen.getByRole('button', { name: '测试工作区导出' })
     expect(screen.queryByRole('button', { name: '重命名' })).toBeNull()
     expect(screen.queryByRole('button', { name: '编辑描述' })).toBeNull()
     expect(screen.getAllByRole('button', { name: '编辑' })).toHaveLength(1)
@@ -422,6 +583,15 @@ describe('V2 routes', () => {
     })
     expect(screen.getByText('更新的描述')).toBeTruthy()
     expect(new Headers(update.headers).get('If-Match')).toBe('"project-17-1"')
+    expect(workspace.props.at(-1)?.project).toMatchObject({
+      name: 'Renamed',
+      stateVersion: 2,
+      collaboration: project.collaboration,
+    })
+    expect(workspace.mounts).toEqual(mounts)
+    expect(workspace.unmounts).toEqual(unmounts)
+    expect(screen.getByRole('button', { name: '测试工作区导出' })).toBe(exportButton)
+    expect(exportButton.isConnected).toBe(true)
   })
 
   it('edits and clears descriptions while preserving project metadata and using the latest version', async () => {
@@ -444,7 +614,9 @@ describe('V2 routes', () => {
           `"project-17-${project.stateVersion}"`,
         )
         project = { ...project, ...metadata, stateVersion: project.stateVersion + 1 }
-        return Promise.resolve(ok(project))
+        const { collaboration: _collaboration, ...summary } = project
+        void _collaboration
+        return Promise.resolve(ok(summary))
       }
       if (path === '/api/teams/9/projects/17') return Promise.resolve(ok(project))
       throw new Error(`Unexpected request: ${path}`)

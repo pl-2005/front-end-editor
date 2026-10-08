@@ -1,0 +1,55 @@
+@media (max-width: 900px) {
+  .v2-topbar.ant-layout-header {
+    flex-wrap: wrap;
+    gap: 8px 20px;
+  }
+  .v2-topbar nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .v2-account {
+    width: auto;
+    margin-left: auto;
+  }
+  .auth-shell {
+    grid-template-columns: minmax(0, 420px);
+    gap: 28px;
+    padding: 32px 20px;
+  }
+  .auth-intro h1,
+  .auth-intro p,
+  .auth-feature {
+    display: none;
+  }
+  .auth-logo {
+    justify-content: center;
+  }
+}
+@media (max-width: 650px) {
+  .v2-topbar.ant-layout-header {
+    padding-inline: 16px;
+  }
+  .v2-account > span {
+    display: none;
+  }
+  .v2-account .ant-btn {
+    font-size: 12px;
+  }
+  .v2-brand span {
+    font-size: 11px;
+  }
+  .auth-card .ant-card-body {
+    padding: 28px 24px;
+  }
+  .v2-panel.ant-card .ant-card-body,
+  .v2-card.ant-card .ant-card-body {
+    padding: 20px;
+  }
+}
+
+.dialog-field {
+  display: grid;
+  gap: 10px;
+  padding-block: 12px;
+  color: var(--text-muted);
+}
