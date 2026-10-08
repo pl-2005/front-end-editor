@@ -51,6 +51,8 @@ JWT、刷新令牌、密码和协作票据不得进入 localStorage、sessionSto
 
 Cookie 统一由后端组件创建和删除，建议名为 `web_editor_refresh`：
 
+本机多个 Vite 前端实例按实际监听端口隔离浏览器 Cookie，例如 `web_editor_refresh_5173` 和 `web_editor_refresh_5174`。开发代理只把当前端口的 Cookie 改名为后端固定名称，其他端口以及旧共享 Cookie 不转发；响应中的签发与删除同步改名，安全属性不变。首次切换后各端口分别重新登录。同一端口的标签页仍共享身份与 Web Locks；不同端口可以使用不同账号。生产 nginx 不采用开发代理命名，继续使用固定 Cookie 契约。端口命名只隔离开发实例的会话选择，Cookie 本身仍按主机作用域发送。
+
 | 属性 | 目标值 |
 | --- | --- |
 | HttpOnly | true，固定不可关闭 |

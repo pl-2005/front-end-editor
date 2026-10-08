@@ -11,10 +11,11 @@ import { createAuthFetch } from './auth-cookie-client.mjs'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const config = parseEnv(readFileSync(root + '.env', 'utf8'))
 const base = 'http://127.0.0.1:18608', origin = 'http://127.0.0.1:15608'
+const otherOrigin = 'http://127.0.0.1:15609'
 const proxy = process.env.CDP_PROXY_URL ?? 'http://localhost:3456'
 const run = randomUUID(), children = [], tabs = [], logs = []
 const storageSecret = randomBytes(32).toString('hex'), gatewaySecret = randomBytes(32).toString('hex'), initializerSecret = randomBytes(32).toString('hex')
-const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin,
+const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin + ',' + otherOrigin,
   AUTH_REDIS_NAMESPACE: (config.AUTH_REDIS_NAMESPACE ?? 'web-editor:auth') + ':session-acceptance:' + run,
   COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true', COLLAB_MAINTENANCE_ENABLED: 'false',
   COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret,
@@ -23,7 +24,7 @@ mkdirSync(root + '.codex-build', { recursive: true })
 let gateway
 function launch(command, args, environment, name) {
   const log = openSync(root + '.codex-build/auth-' + name + '.log', 'w'); logs.push(log)
-  const child = spawn(command, args, { cwd: name === 'vite' ? root + 'frontend' : root, env: environment, windowsHide: true, stdio: ['ignore', log, log] })
+  const child = spawn(command, args, { cwd: name.startsWith('vite') ? root + 'frontend' : root, env: environment, windowsHide: true, stdio: ['ignore', log, log] })
   children.push(child); return child
 }
 async function until(predicate, label, timeout = 30_000) {
@@ -78,11 +79,12 @@ try {
   launch(process.execPath, [root + 'collaboration/dist/server.js'], { ...env, COLLAB_INITIALIZER_PORT: '18610', COLLAB_INITIALIZER_NONCE_PATH: root + '.codex-build/auth-initializer.sqlite' }, 'initializer')
   const backend = launch('java', ['-jar', root + 'backend/target/backend-0.1.0-SNAPSHOT.jar', '--server.address=127.0.0.1', '--server.port=18608'], env, 'backend')
   await until(async () => { if (backend.exitCode !== null) throw new Error('AUTH_BACKEND_EXITED'); try { return (await fetch(base + '/api/health/readiness')).ok } catch { return false } }, 'local MySQL/MinIO/Redis readiness', 60_000)
-  gateway = createGateway({ enabled: true, origins: [origin], port: 18609, address: '127.0.0.1', springUrl: base, storageSecret, gatewaySecret,
+  gateway = createGateway({ enabled: true, origins: [origin, otherOrigin], port: 18609, address: '127.0.0.1', springUrl: base, storageSecret, gatewaySecret,
     noncePath: root + '.codex-build/auth-gateway.sqlite', maxRooms: 10, maxConnections: 30, maxRoomConnections: 10,
     maxMemoryBytes: 512 * 1024 * 1024, maxMessagesPerSecond: 100, maxBytesPerSecond: 4 * 1024 * 1024 })
   await gateway.server.listen()
   launch(process.execPath, [root + 'frontend/node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '15608', '--strictPort'], { ...env, LOCAL_API_URL: base, LOCAL_COLLAB_URL: 'ws://127.0.0.1:18609' }, 'vite')
+  launch(process.execPath, [root + 'frontend/node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '15609', '--strictPort'], { ...env, LOCAL_API_URL: base, LOCAL_COLLAB_URL: 'ws://127.0.0.1:18609', LOCAL_VITE_CACHE_DIR: 'node_modules/.vite-auth-other' }, 'vite-other')
   await until(async () => { try { return (await fetch(origin)).ok } catch { return false } }, 'vite')
   const name = 'auth_' + randomBytes(6).toString('hex'), password = randomBytes(24).toString('hex')
   await api('/api/auth/register', { username: name, password }, 201)
@@ -162,6 +164,24 @@ try {
     assert.equal(await evaluate(tab, "return !document.cookie.includes('web_editor_refresh') && !JSON.stringify(localStorage).includes('accessToken') && !JSON.stringify(sessionStorage).includes('accessToken');"), true)
   }
   pass('Real Chrome project reload, same-browser new tab, simultaneous reloads, route/query/hash and HttpOnly boundary')
+
+  await until(async () => { try { return (await fetch(otherOrigin)).ok } catch { return false } }, 'second Vite instance')
+  const otherTab = await newTab(otherOrigin + '/teams')
+  await until(async () => evaluate(otherTab, "const a=await import('/src/api/auth.ts');return a.getAuthStatus()==='anonymous' && location.pathname==='/login';"), 'second port stays anonymous')
+  const otherName = 'auth_other_' + randomBytes(6).toString('hex'), otherPassword = randomBytes(24).toString('hex')
+  await api('/api/auth/register', { username: otherName, password: otherPassword }, 201)
+  await evaluate(otherTab, `const a=await import('/src/api/auth.ts');await a.login(${JSON.stringify(otherName)},${JSON.stringify(otherPassword)});return true;`)
+  assert.equal(await evaluate(tab1, "const a=await import('/src/api/auth.ts');return a.getAuthUser()?.username;"), name)
+  await Promise.all([evaluate(tab1, "const a=await import('/src/api/auth.ts');await a.refreshCredentials();return true;"),
+    evaluate(otherTab, "const a=await import('/src/api/auth.ts');await a.refreshCredentials();return true;")])
+  await cdp('/navigate?target=' + otherTab, otherOrigin + '/teams')
+  await until(async () => evaluate(otherTab, `const a=await import('/src/api/auth.ts');return a.getAuthUser()?.username===${JSON.stringify(otherName)};`), 'second port reload retains its own user')
+  await evaluate(otherTab, "const a=await import('/src/api/auth.ts');await a.logout();return true;")
+  await evaluate(tab1, "const a=await import('/src/api/auth.ts');await a.refreshCredentials();return true;")
+  assert.equal(await evaluate(tab1, "const a=await import('/src/api/auth.ts');return a.getAuthUser()?.username;"), name)
+  await cdp('/navigate?target=' + otherTab, otherOrigin + '/teams')
+  await until(async () => evaluate(otherTab, "const a=await import('/src/api/auth.ts');return a.getAuthStatus()==='anonymous';"), 'second port logout deletes only its cookie')
+  pass('Two Vite ports: separate users, independent recovery and parallel refresh; logout clears only its own instance cookie')
 
   const before = await evaluate(tab1, "const a=await import('/src/api/auth.ts');return a.getAuthSession();")
   await evaluate(tab1, "window.__authFetch=window.fetch;window.fetch=(url,init)=>String(url).endsWith('/api/auth/refresh')?Promise.resolve(new Response(JSON.stringify({code:'AUTH_SERVICE_UNAVAILABLE'}),{status:503})):window.__authFetch(url,init);const a=await import('/src/api/auth.ts');try{await a.refreshCredentials()}catch{}return true;")

@@ -144,6 +144,8 @@ Pop-Location
 
 ## 浏览器登录会话恢复验证
 
+本机同时打开 localhost:5173 和 localhost:5174 时，Vite 代理按实际监听端口改写刷新 Cookie 名称，两个实例可分别登录不同账号；同端口多个标签页仍共享会话。AUTH_ALLOWED_ORIGINS 与 COLLAB_ALLOWED_ORIGINS 均需包含实际前端 Origin，模板已列出这两个端口；修改根 .env 后重启后端和协作网关。旧无端口共享 Cookie 不用于开发实例恢复，首次切换请在各端口分别重新登录。自动递增或手动指定其他 Vite 端口同样隔离，但须自行补齐来源白名单。生产 API Cookie 契约不变。
+
 浏览器必须支持 Web Locks 且允许 localStorage；生产 HTTPS，本机固定同一 loopback 主机名。默认 JWT 10 分钟，成功刷新定义的空闲时限 30 分钟，令牌族绝对寿命 12 小时；协作活动不会自行续期。临时失败保留离线队列，不确定刷新只允许手动重试。
 
 加载根 .env 后运行 Maven test/package、frontend npm test/lint/build、collaboration npm test/build。完成打包并启动本机 CDP Proxy 后，仓库根执行 node collaboration/scripts/verify-auth-session-local.mjs。脚本使用根 .env 的本机 MySQL/MinIO/Redis、自建应用端口和 Redis 命名空间，Cookie jar 仅驻内存，只输出状态和场景标识，关闭自建标签页及进程，保留新增验收业务数据。实际范围与结果见 [验收记录](../auth-session/verification.md)。
