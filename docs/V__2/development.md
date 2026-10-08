@@ -83,6 +83,8 @@ Pop-Location
 
 终端四从仓库根执行 `cd frontend`、`npm run dev`，打开 `http://localhost:5173`。Vite 读取根 `.env` 的本地代理配置；`/api` 默认代理到 localhost:8080，精确 `/collaboration` 默认代理到 loopback:8092。Origin 白名单须与实际浏览器地址完全一致，localhost 与 127.0.0.1 是不同 Origin。
 
+多开前端时，每个 Vite 开发进程使用独立的依赖缓存目录，默认位于 `frontend/node_modules/.vite/instances/<进程号>`。`LOCAL_VITE_CACHE_DIR` 可覆盖缓存根目录，其下仍按进程隔离，避免多个实例同时优化依赖时互相覆盖。重启进程后会重新生成缓存；所有前端实例停止后，可清理旧的实例缓存目录。HTML 语言服务在启动时预先优化，减少首次打开协作编辑器时因发现新依赖而触发的页面刷新。生产构建不使用这些实例目录。
+
 ## 检查与验收
 
 普通代码检查从仓库根执行；每组检查确认成功后再继续：
