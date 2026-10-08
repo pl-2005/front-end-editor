@@ -1,13 +1,27 @@
 import { CodeOutlined, TeamOutlined } from '@ant-design/icons'
 import { Button, Card, Input } from 'antd'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { login, register } from '../../../api/auth'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useSyncExternalStore } from 'react'
+import {
+  getAuthError,
+  getAuthStatus,
+  login,
+  logout,
+  register,
+  subscribeAuth,
+} from '../../../api/auth'
+import { safeReturnTo } from '../../../api/returnTo'
 import { useTask } from '../../../hooks/useTask'
+import { useNotice } from '../../../ui/useNotice'
 
 export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const status = useSyncExternalStore(subscribeAuth, getAuthStatus)
+  const authError = useSyncExternalStore(subscribeAuth, getAuthError)
   const task = useTask()
+  const show = useNotice()
   const [passwordVisible, setPasswordVisible] = useState(false)
   return (
     <main className="auth-shell">
@@ -42,12 +56,26 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
                 navigate('/login', { replace: true })
               } else {
                 await login(name, password)
-                navigate('/teams', { replace: true })
+                navigate(safeReturnTo(location.state?.returnTo), { replace: true })
               }
             })
           }}
         >
           <span className="auth-eyebrow">你的创作空间</span>
+          {authError && <p role="status">{authError}</p>}
+          {status === 'logout-pending' && (
+            <Button
+              onClick={() => {
+                void logout()
+                  .then((result) => {
+                    if (result.outcome === 'revoked') show('已退出登录', 'success')
+                  })
+                  .catch(() => {})
+              }}
+            >
+              重试退出
+            </Button>
+          )}
           <h2>{mode === 'login' ? '登录' : '注册账号'}</h2>
           <p className="auth-description">
             {mode === 'login' ? '欢迎回来，继续你的团队项目。' : '创建账号，开始与团队共同创作。'}

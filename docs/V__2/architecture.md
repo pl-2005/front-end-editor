@@ -42,7 +42,7 @@ flowchart LR
 
 ## 前端依赖与生命周期
 
-`V2App → app → features 页面 → 业务 Hook/组件 → api/types/ui`。共享模块不引用页面；项目操作不引用团队页面。`AppShell` 继续由各页面挂载，页面切换重置顶部栏折叠状态。认证守卫只读取内存身份，不增加会话恢复或回跳规则。
+`V2App → app → features 页面 → 业务 Hook/组件 → api/types/ui`。共享模块不引用页面；项目操作不引用团队页面。`AppShell` 继续由各页面挂载，页面切换重置顶部栏折叠状态。认证守卫在 Cookie 会话恢复完成前阻止受保护页面挂载；恢复失败提供重试，登录后返回经校验的站内原地址。
 
 `useTeamDetails` 是团队基础与所有者管理数据的一份快照。所有 reload 共用取消控制与递增请求序号；写入基础、管理及错误数据前核对序号和身份。失去所有者身份清空审批/邀请，旧响应不能恢复它们。列表、发现与邀请 Hook 清理请求及防抖，按身份和查询参数识别有效结果。
 
@@ -74,10 +74,16 @@ Flyway 迁移已落地至 V13：V1/V2 保留旧快照表与约束；V3 元数据
 
 ## 安全与故障边界
 
-REST 从启动起强制认证，公开注册、登录、刷新、发现和健康检查按安全链开放。授权按数据库当前团队关系查询，不使用 JWT 中的项目角色。刷新凭据与 JWT 不写浏览器持久存储；票据只经 WebSocket 认证消息传递，不放 URL。
+REST 从启动起强制认证，公开注册、登录、刷新、发现和健康检查按安全链开放。授权按数据库当前团队关系查询，不使用 JWT 中的项目角色。JWT、密码与票据不写浏览器持久层；刷新凭据由 HttpOnly Cookie 保存；localStorage 只保存随机身份标记和退出待确认状态；票据只经 WebSocket 认证消息传递，不放 URL。
 
 网关先校验精确 Origin，再消费单次票据并复核 epoch 与授权水位；最长 5 秒写入授权租约及 Outbox 关闭旧权限连接。Update 在广播前用临时 Y.Doc 校验，文件/文档/pending/连接/RSS 均有硬上限。内部 HMAC 按 storage、gateway、initializer、maintenance 分开密钥和 audience，nonce 持久化防重放。
 
 持久化失败保留 pending 并暂停写入；CAS 冲突只在同 epoch 合并重试，旧 epoch 拒绝。删除先 fence/flush 再提交数据库；未确认 durable-close 不完成删除。进程突然崩溃可能丢失只在内存的更新，客户端日志在重新授权后重发。当前文件恢复使用配套 MySQL/MinIO 备份，重建新 epoch；不提供 V1 revision 回退或已删除项目恢复。
 
 首期单网关，不含多实例广播、项目 Viewer、平台管理员或用户版本控制。容量与运行说明见 [开发指南](development.md)，详细故障处置见 [运维说明](step10-operations.md)。
+
+## 浏览器会话恢复
+
+认证保持无状态 JWT/Redis 令牌族。AuthOriginFilter 在签发前验证精确配置 Origin、自定义头及 JSON；AuthCookie 统一写入和删除，BrowserCredentialsWriter 输出专用公开 DTO。登录、刷新、注销与改密在 MySQL 用户写锁内界定版本顺序；刷新先读 Redis 元数据，再准备 JWT/序列化，最后 Lua 原子重校验并提交。事务结束或响应交付失败不会补偿恢复 used 令牌。
+
+前端模块共享恢复 Promise 和页面内刷新 Promise，使用同源 Web Locks 串行完整请求及解析。password 锁内直接刷新，无嵌套锁。普通刷新保留 sessionGeneration；临时故障保留工作区及 IndexedDB 队列，确定撤权才触发既有 forbid/清理。退出先写 pending 并通知其他页，失败或重载不自动恢复。支持与检查记录见 [会话验收](../auth-session/verification.md)。

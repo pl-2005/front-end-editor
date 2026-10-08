@@ -49,7 +49,7 @@ try {
   child(process.execPath, [collab + '/dist/server.js'], { ...systemEnv, COLLAB_INITIALIZER_SECRET: config.COLLAB_INITIALIZER_SECRET,
     COLLAB_INITIALIZER_PORT: '18100', COLLAB_INITIALIZER_NONCE_PATH: root + '/.codex-build/local-initializer-nonces.sqlite' }, 'initializer')
   const backend = child('java', ['-jar', root + '/.codex-build/step11-backend/backend-0.1.0-SNAPSHOT.jar', '--server.address=127.0.0.1', '--server.port=18098'],
-    { ...systemEnv, ...config, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true', COLLAB_MAINTENANCE_ENABLED: 'false',
+    { ...systemEnv, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin + ',http://localhost:15175', COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true', COLLAB_MAINTENANCE_ENABLED: 'false',
       COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18100/internal/initialize', COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18099' }, 'backend')
   await until(async () => { if (backend.exitCode !== null) throw new Error('LOCAL_BACKEND_EXITED'); try { return (await fetch(base + '/api/health/readiness')).ok } catch { return false } })
   const positive = (key, fallback) => { const n = Number(config[key] ?? fallback); if (!Number.isSafeInteger(n) || n <= 0) throw new Error('LOCAL_LIMIT_INVALID'); return n }

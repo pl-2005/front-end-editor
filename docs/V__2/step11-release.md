@@ -84,3 +84,9 @@ Pop-Location
 本次交付按用户要求只运行本机，不做公网发布。构建和验收完成后，在 `collaboration` 执行 `npm run start:local`，打开 `http://127.0.0.1:15175`。后端/网关/初始化分别监听 loopback 18098/18099/18100，前端为实际构建静态文件，同源转发 `/api/` 与 `/collaboration`，阻断内部路径。
 
 启动器读取仓库根 `.env` 的本机 MySQL/MinIO/Redis、JWT 和 HMAC 配置，仅本次进程开启创建/票据/网关并关闭维护模式；不改写 `.env` 或默认关闭策略。初始化服务只收到 initializer 密钥，网关只收到 storage/gateway 密钥。nonce/fence 保存在 `.codex-build/local-*-nonces.sqlite` 并跨重启保留。正常 Ctrl+C 停止时先 flush 网关，失败则保持依赖进程并重试；成功后关闭本机入口和自己启动的子进程。不要在运行期间同时执行本机验收（两者使用同一组端口）。备份、验收账号/项目保留本机；用户可自行注册使用，不在文档中保存账号凭据。
+
+## Cookie 会话契约发布
+
+本次 login/refresh JSON 删除 refreshToken；前后端必须同批发布，停止旧制品并要求旧页面重载，首次切换允许重新登录，不保留旧 JSON 刷新入口。生产 AUTH_COOKIE_SECURE=true、AUTH_LOCAL_DEVELOPMENT=false，AUTH_ALLOWED_ORIGINS 精确配置 HTTPS 页面 Origin；代理保留 Origin/Cookie/Set-Cookie，认证响应不可缓存。Redis 存储格式未变，不需要数据库迁移。
+
+回滚必须同步回滚前后端；先由仍理解 Cookie 契约的后端清除 HttpOnly Cookie，旧前端无法自行删除。强制撤销使用已验证的命名空间切换或用户版本撤销流程，不能清空共享 Redis。回滚要求重新登录。

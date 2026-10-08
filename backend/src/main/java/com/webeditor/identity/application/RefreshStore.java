@@ -36,6 +36,8 @@ public class RefreshStore {
             @Value("${editor.auth.refresh-max-lifetime}") Duration maximum,
             @Value("${editor.auth.max-refresh-families-per-user}") int maxFamilies) {
         this.redis = redis; this.namespace = namespace; this.idle = idle; this.maximum = maximum; this.maxFamilies = maxFamilies;
+        if (idle.isZero() || idle.isNegative() || maximum.isZero() || maximum.isNegative() || maxFamilies <= 0)
+            throw new IllegalArgumentException("Auth lifetimes and family limit must be positive");
     }
     /**
      * 为刷新令牌相关 Redis 键添加配置的命名空间。
@@ -67,7 +69,7 @@ public class RefreshStore {
         if ttl <= 0 or tonumber(ARGV[3]) > tonumber(ARGV[4]) then return 0 end
         redis.call('PSETEX', KEYS[1], ttl, 'used:' .. ARGV[5])
         redis.call('PSETEX', KEYS[3], ttl, ARGV[6])
-        return 1
+        return ttl
         """, Long.class);
     /**
      * 创建令牌族和首个刷新令牌，设置空闲与最长生命周期，并淘汰超过上限的旧令牌族。
@@ -93,13 +95,18 @@ public class RefreshStore {
         return token;
     }
     public record Rotated(String token, RefreshUser user) {}
-    /**
-     * 用 Lua 原子将旧令牌标记已用并签发下一令牌；重放已用令牌会撤销整个令牌族。
-     *
-     * @param oldToken 待轮换的刷新令牌
-     * @return 新刷新令牌及关联用户和令牌版本
-     */
-    public Rotated rotate(String oldToken) {
+    public record Prepared(String oldKey, String value, String family, RefreshUser user) {}
+    public record Issued(String token, long cookieSeconds) {}
+    public Issued issue(long userId, long version) {
+        String token = create(userId, version);
+        Prepared prepared = inspect(token);
+        Long remaining = redis.getExpire(key("family:" + prepared.family()), java.util.concurrent.TimeUnit.MILLISECONDS);
+        long idleRemaining = Long.parseLong(prepared.value().split(":", 4)[3]) - Instant.now().toEpochMilli();
+        if (remaining == null || remaining <= 0 || idleRemaining <= 0) throw new AuthFailure(503, "AUTH_SERVICE_UNAVAILABLE");
+        return new Issued(token, Math.min(idleRemaining, remaining) / 1000);
+    }
+    /** Read without consuming. Used tokens still revoke their family. */
+    public Prepared inspect(String oldToken) {
         if (oldToken == null || !oldToken.matches("[A-Za-z0-9_-]{43}")) throw new AuthFailure(401, "AUTHENTICATION_REQUIRED");
         String oldKey = key("token:" + digest(oldToken));
         String value = redis.opsForValue().get(oldKey);
@@ -109,14 +116,34 @@ public class RefreshStore {
             throw new AuthFailure(401, "AUTHENTICATION_REQUIRED");
         }
         String[] parts = value.split(":", 4);
-        if (parts.length != 4) throw new AuthFailure(401, "AUTHENTICATION_REQUIRED");
-        String next = random();
+        if (parts.length != 4 || Instant.now().toEpochMilli() > Long.parseLong(parts[3])
+                || !(parts[0] + ":" + parts[1] + ":" + parts[2]).equals(redis.opsForValue().get(key("family:" + parts[2]))))
+            throw new AuthFailure(401, "AUTHENTICATION_REQUIRED");
+        return new Prepared(oldKey, value, parts[2], new RefreshUser(Long.parseLong(parts[0]), Long.parseLong(parts[1])));
+    }
+    public String nextToken() { return random(); }
+    /** Final Lua compare-and-swap; any execution failure has an unknown outcome. */
+    public Issued commit(Prepared prepared, String next) {
+        String[] parts = prepared.value().split(":", 4);
         String familyValue = parts[0] + ":" + parts[1] + ":" + parts[2];
         long now = Instant.now().toEpochMilli();
-        Long result = redis.execute(ROTATE, List.of(oldKey, key("family:" + parts[2]), key("token:" + digest(next))),
-                value, familyValue, Long.toString(now), parts[3], parts[2],
-                familyValue + ":" + (now + idle.toMillis()));
-        if (result == null || result != 1) throw new AuthFailure(401, "AUTHENTICATION_REQUIRED");
-        return new Rotated(next, new RefreshUser(Long.parseLong(parts[0]), Long.parseLong(parts[1])));
+        Long result;
+        try {
+            result = redis.execute(ROTATE, List.of(prepared.oldKey(), key("family:" + parts[2]), key("token:" + digest(next))),
+                    prepared.value(), familyValue, Long.toString(now), parts[3], parts[2], familyValue + ":" + (now + idle.toMillis()));
+        } catch (RuntimeException e) { throw new AuthFailure(503, "AUTH_REFRESH_OUTCOME_UNKNOWN"); }
+        if (result == null) throw new AuthFailure(503, "AUTH_REFRESH_OUTCOME_UNKNOWN");
+        if (result <= 0) throw new AuthFailure(401, "AUTHENTICATION_REQUIRED");
+        return new Issued(next, Math.min(idle.toMillis(), result) / 1000);
+    }
+    /**
+     * 用 Lua 原子将旧令牌标记已用并签发下一令牌；重放已用令牌会撤销整个令牌族。
+     *
+     * @param oldToken 待轮换的刷新令牌
+     * @return 新刷新令牌及关联用户和令牌版本
+     */
+    public Rotated rotate(String oldToken) {
+        Prepared prepared = inspect(oldToken);
+        return new Rotated(commit(prepared, nextToken()).token(), prepared.user());
     }
 }

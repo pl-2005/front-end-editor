@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -17,7 +18,7 @@ const config = parseEnv(readFileSync(new URL('../../.env', import.meta.url), 'ut
 mkdirSync(root + '/.codex-build', { recursive: true })
 const storageSecret = randomBytes(32).toString('hex'), gatewaySecret = randomBytes(32).toString('hex'), initializerSecret = randomBytes(32).toString('hex')
 const base = 'http://127.0.0.1:18086', origin = 'http://localhost:5173'
-const env = { ...process.env, ...config, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
+const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
   COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18092', COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18093/internal/initialize',
   COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret }
 const encoderEnv = {}
@@ -37,8 +38,9 @@ async function until(predicate, timeout = 10000) {
   while (Date.now() < end) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 100)) }
   throw new Error('Local acceptance condition timeout')
 }
+const authFetch = createAuthFetch(origin)
 async function api(path, method = 'GET', body, expected = 200) {
-  const response = await fetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+  const response = await authFetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) })
   const result = response.status === 204 ? undefined : await response.json()
   assert.equal(response.status, expected, `${method} ${path}: ${result?.code ?? 'unexpected status'}`)

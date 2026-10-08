@@ -14,6 +14,8 @@
 
 | 配置 | 用途/默认策略 |
 | --- | --- |
+| AUTH_ALLOWED_ORIGINS | 必填，逗号分隔精确页面 Origin；生产只允许 HTTPS，不支持 * |
+| AUTH_COOKIE_SECURE、AUTH_LOCAL_DEVELOPMENT | Secure 默认 true；本机 loopback HTTP 显式 false/true |
 | DB_URL、DB_USERNAME、DB_PASSWORD | MySQL JDBC 与应用账号 |
 | MINIO_ENDPOINT、MINIO_ACCESS_KEY、MINIO_SECRET_KEY | MinIO API 与凭据 |
 | MINIO_BUCKET、MINIO_INITIALIZE_BUCKET | 私有 bucket；默认 web-editor、true |
@@ -134,8 +136,14 @@ Pop-Location
 | LOCAL_START_FAILED | 三服务、独立密钥、构建产物、端口占用；受限日志位于 .codex-build |
 | 协作暂未开放/连接失败 | 三项开关、初始化/API/网关进程、Origin 与精确 WS 代理 |
 | 已同步但未持久化 | pending/durable 指纹、MinIO/MySQL、CAS、paused；不丢弃队列 |
-| 刷新后需要登录 | 凭据仅放内存，是当前设计；授权后再恢复同 epoch 日志 |
+| 刷新后需要登录 | 检查 Cookie 是否到期、会话是否撤销/淘汰；临时故障应显示重试，不能清离线数据 |
 | 409 或 428 | 重新取得元数据 ETag 并显式重试；不使用 generation 替代 |
 | 项目被 fence | 查询 operation/recovery 与 Outbox，按运维对账；不删除 nonce/fence 文件 |
 
 `/api/health` 仅是进程健康；readiness 只检查数据库。备份和恢复依 [运维说明](step10-operations.md)，不可手工猜测或修改对象指针。
+
+## 浏览器登录会话恢复验证
+
+浏览器必须支持 Web Locks 且允许 localStorage；生产 HTTPS，本机固定同一 loopback 主机名。默认 JWT 10 分钟，成功刷新定义的空闲时限 30 分钟，令牌族绝对寿命 12 小时；协作活动不会自行续期。临时失败保留离线队列，不确定刷新只允许手动重试。
+
+加载根 .env 后运行 Maven test/package、frontend npm test/lint/build、collaboration npm test/build。完成打包并启动本机 CDP Proxy 后，仓库根执行 node collaboration/scripts/verify-auth-session-local.mjs。脚本使用根 .env 的本机 MySQL/MinIO/Redis、自建应用端口和 Redis 命名空间，Cookie jar 仅驻内存，只输出状态和场景标识，关闭自建标签页及进程，保留新增验收业务数据。实际范围与结果见 [验收记录](../auth-session/verification.md)。

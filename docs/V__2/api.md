@@ -4,7 +4,7 @@
 
 ## 通用约定
 
-除公开接口外，请求携带 `Authorization: Bearer <accessToken>`，JSON 正文使用 `Content-Type: application/json`。JWT 与刷新凭据只放内存；不使用 Cookie 或服务器 Session，不开放浏览器跨源 CORS。未知 JSON 字段拒绝，不能上传角色、创建人或存储指针。
+除公开接口外，请求携带 `Authorization: Bearer <accessToken>`，JSON 正文使用 `Content-Type: application/json`。JWT 与用户资料只放页面内存；刷新令牌只由 HttpOnly Cookie 传递，不使用服务器 Session，不开放浏览器跨源 CORS。普通业务请求固定 credentials: omit；认证修改请求使用 same-origin、精确 Origin 和 X-Web-Editor-Request: browser。未知 JSON 字段拒绝，不能上传角色、创建人或存储指针。
 
 一般 JSON 响应包含 `timestamp`、`status`、`code`、`message`、`data`；错误详情依错误类型位于 data，204 无正文。以 HTTP 状态码判断请求成功：当前项目创建/复制 HTTP 为 201，但其 `ApiResponse.ok` 正文仍为 status=200/code=OK。列表分页参数默认 page=0、size=20，size 上限 100。团队分页使用 Spring Page；项目列表 data 为 content/page/size/totalElements/totalPages。
 
@@ -14,12 +14,12 @@
 | --- | --- | --- | --- |
 | POST | `/api/auth/register` | username/email/password/displayName；201 用户资料，注册后显式登录 | 公开、限流 |
 | POST | `/api/auth/login` | 仅 login/password；login 为用户名或邮箱 | 公开、限流 |
-| POST | `/api/auth/refresh` | refreshToken；轮换刷新凭据 | 公开、限流 |
+| POST | `/api/auth/refresh` | 严格空对象 {}；从 Cookie 原子轮换，拒绝旧 refreshToken JSON | Cookie、来源校验、限流 |
 | GET | `/api/auth/me` | 当前用户资料 | Bearer |
-| POST | `/api/auth/logout` | 无正文；撤销所有设备会话，204 | Bearer |
+| POST | `/api/auth/logout` | 严格空对象 {}；200 data.outcome=revoked 或 local-only，成功清 Cookie | Cookie、来源校验，不要求 Bearer |
 | PUT | `/api/auth/password` | currentPassword/newPassword；改密并撤销旧会话，204 | Bearer |
 
-登录和刷新 data 为 user/accessToken/refreshToken/expiresIn，expiresIn 单位为秒，响应禁止缓存。user 包含 id/username/email/displayName/avatarColor。密码约束、规范化和错误码细节见 [身份步骤](steps/02-identity-jwt.md)。
+登录和刷新 data 为 user/accessToken/expiresIn，expiresIn 单位为秒，JSON 不含刷新令牌。所有认证响应（含错误）Cache-Control: no-store。Cookie 名 web_editor_refresh，HttpOnly、SameSite=Strict、Path=/api/auth、host-only，生产 Secure；Max-Age 为刷新空闲与族寿命剩余时间的较小值向下取整。登录失败不删除已有 Cookie；刷新 401 清 Cookie，400/403/429/503 保留。503 AUTH_SERVICE_UNAVAILABLE 表示提交前不可用，AUTH_REFRESH_OUTCOME_UNKNOWN 表示轮换结果不确定，不自动重发。logout revoked 只在撤销事务提交后返回；local-only 只确认本机匿名，不能声称其他设备已退出。改密码成功清 Cookie，失败保留。user 包含 id/username/email/displayName/avatarColor。密码约束、规范化和错误码细节见 [身份步骤](steps/02-identity-jwt.md)。
 
 ## 团队与成员
 

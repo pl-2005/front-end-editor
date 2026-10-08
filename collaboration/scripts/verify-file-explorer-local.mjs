@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync, mkdirSync, openSync, closeSync } from 'node:fs'
 import { parseEnv } from 'node:util'
@@ -27,8 +28,9 @@ async function until(predicate, timeout = 15000) {
   while (Date.now() < deadline) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)) }
   throw new Error('FILE_EXPLORER_ACCEPTANCE_TIMEOUT')
 }
+const authFetch = createAuthFetch(origin)
 async function api(path, method = 'GET', body, expected = 200, headers = {}) {
-  const response = await fetch(base + path, { method, headers: {
+  const response = await authFetch(base + path, { method, headers: {
     ...(user ? { Authorization: `Bearer ${user.accessToken}` } : {}),
     ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers,
   }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20000) })
@@ -59,7 +61,7 @@ try {
     COLLAB_INITIALIZER_NONCE_PATH: root + `.codex-build/file-explorer-initializer-${runId}.sqlite`,
   })
   const backend = launch(['java', '-jar', root + '.codex-build/step11-backend/backend-0.1.0-SNAPSHOT.jar', '--server.address=127.0.0.1', '--server.port=18598'], {
-    ...process.env, ...config, AUTH_REDIS_NAMESPACE: 'file-explorer-acceptance:' + runId,
+    ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin, AUTH_REDIS_NAMESPACE: 'file-explorer-acceptance:' + runId,
     COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true', COLLAB_MAINTENANCE_ENABLED: 'false',
     COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18600/internal/initialize', COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18599',
     COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret,

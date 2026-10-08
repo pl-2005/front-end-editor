@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { parseEnv } from 'node:util'
@@ -74,8 +75,9 @@ if (process.argv.includes('--recover')) {
    * @param input 请求输入
    * @param expectedStatus 预期 HTTP 状态码
    */
-  async function api(path, method = 'GET', input, expectedStatus = 200) {
-    const response = await fetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(input ? { 'Content-Type': 'application/json' } : {}) }, ...(input ? { body: JSON.stringify(input) } : {}) })
+  const authFetch = createAuthFetch((config.AUTH_ALLOWED_ORIGINS?.split(',')[0] ?? 'http://localhost:5173'))
+async function api(path, method = 'GET', input, expectedStatus = 200) {
+    const response = await authFetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(input ? { 'Content-Type': 'application/json' } : {}) }, ...(input ? { body: JSON.stringify(input) } : {}) })
     assert.equal(response.status, expectedStatus, `Unexpected status for ${method} ${path}`)
     if (response.status === 204) return
     return (await response.json()).data
@@ -124,7 +126,7 @@ if (process.argv.includes('--recover')) {
   const details = await api(`/api/teams/${team.id}/projects/${project.id}`)
   assert.equal(details.version, undefined); assert.equal(details.files, undefined); assert.equal(details.collaboration.generation, 3)
   writeFileSync(statePath, JSON.stringify({ projects: [p, cp] }, null, 2) + '\n')
-  await api('/api/auth/logout', 'POST', undefined, 204)
+  await api('/api/auth/logout', 'POST', {}, 200)
   console.log('PASS: local MySQL/MinIO initialization, binary reload, CAS race, idempotency, epoch rejection, current-state copy and V1 isolation')
   console.log(`Retained acceptance project IDs: ${project.id}, ${copy.id}; team ID: ${team.id}. No credentials recorded.`)
 }

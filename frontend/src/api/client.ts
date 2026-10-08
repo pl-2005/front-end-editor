@@ -1,4 +1,10 @@
-import { accessToken, clearAuth, getAccessToken, getAuthSession, refreshCredentials } from './auth'
+import {
+  accessToken,
+  getAccessToken,
+  getAuthSession,
+  invalidateSession,
+  refreshCredentials,
+} from './auth'
 import { getResponseMessage } from './responseMessage'
 
 export class ApiError extends Error {
@@ -50,17 +56,13 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   let response = await send(token)
   if (session !== getAuthSession()) throw new Error('登录状态已变化')
   if (response.status === 401 && token && getAccessToken()) {
-    try {
-      token =
-        getAccessToken() === token ? (await refreshCredentials()).accessToken : getAccessToken()
-      response = await send(token)
-      if (session !== getAuthSession()) throw new Error('登录状态已变化')
-    } catch {
-      if (getAccessToken() === token) clearAuth()
-    }
+    token = getAccessToken() === token ? (await refreshCredentials()).accessToken : getAccessToken()
+    if (session !== getAuthSession()) throw new Error('登录状态已变化')
+    response = await send(token)
+    if (session !== getAuthSession()) throw new Error('登录状态已变化')
   }
   if (!response.ok) {
-    if (response.status === 401 && token && getAccessToken() === token) clearAuth()
+    if (response.status === 401 && token && getAccessToken() === token) await invalidateSession()
     const payload: unknown = await response.json().catch(() => ({}))
     const body = (payload && typeof payload === 'object' ? payload : {}) as { code?: string }
     const responseMessage = getResponseMessage(payload)
@@ -80,5 +82,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     )
   }
   if (response.status === 204) return undefined as T
-  return ((await response.json()) as { data: T }).data
+  const payload = (await response.json()) as { data: T }
+  if (session !== getAuthSession()) throw new Error('登录状态已变化')
+  return payload.data
 }

@@ -26,6 +26,10 @@ import org.springframework.data.redis.RedisConnectionFailureException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler({org.springframework.dao.DataAccessException.class, org.springframework.transaction.TransactionException.class})
+    ResponseEntity<ApiError> handleDependencyFailure(HttpServletRequest request) {
+        return ResponseEntity.status(503).body(ApiError.of(503, "AUTH_SERVICE_UNAVAILABLE", "认证服务暂时不可用", request.getRequestURI()));
+    }
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private final com.webeditor.collaboration.CollabMetrics metrics;
     public GlobalExceptionHandler(com.webeditor.collaboration.CollabMetrics metrics) { this.metrics = metrics; }

@@ -235,3 +235,5 @@ mvn test
 - 步骤 03：`app_user`、稳定 user ID、`token_version`/`authz_version`、JWT Bearer 校验、`CurrentUser`、强制认证和历史匿名项目 fail-closed 规则；迁移从 V6 开始。
 - 步骤 04：稳定的 register/login/refresh/logout/me/password API 与统一前端 client；登录壳先完成，公开切换由步骤 11 执行。
 - 步骤 06：用户 ID、显示名、颜色和版本；协作票据携带版本，握手必须向 Spring 内省并与数据库当前值比较。
+
+后续更新（2026-10-08）：本文保留步骤完成时的历史行为。浏览器 Cookie 会话恢复改造及实际验收见 [会话方案](../../auth-session/README.md) 和 [验收记录](../../auth-session/verification.md)。

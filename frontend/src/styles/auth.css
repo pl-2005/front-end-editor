@@ -9,6 +9,10 @@
   padding: 48px 32px;
   background: radial-gradient(ellipse at 15% 20%, #dbeafe 0, transparent 55%), var(--page-bg);
 }
+.auth-recovery-loading {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
 .auth-logo {
   display: flex;
   align-items: center;

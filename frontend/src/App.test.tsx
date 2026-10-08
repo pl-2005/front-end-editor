@@ -120,7 +120,6 @@ describe('V2 login landing', () => {
         avatarColor: '#6366F1',
       },
       accessToken: 'test-access-token',
-      refreshToken: 'test-refresh-token',
       expiresIn: 600,
     })
 
@@ -171,7 +170,6 @@ describe('App project coordination', () => {
         avatarColor: '#6366F1',
       },
       accessToken: 'test-access-token',
-      refreshToken: 'test-refresh-token',
       expiresIn: 600,
     })
   })

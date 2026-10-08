@@ -18,12 +18,17 @@ public class AuthService {
          */
         static UserView of(AppUser user) { return new UserView(user.getId(), user.getUsername(), user.getEmail(), user.getDisplayName(), user.getAvatarColor()); }
     }
-    public record Credentials(UserView user, String accessToken, String refreshToken, long expiresIn) {}
+    public record BrowserCredentials(UserView user, String accessToken, long expiresIn) {}
+    public record Credentials(UserView user, String accessToken, String refreshToken, long expiresIn, long cookieSeconds) {
+        public BrowserCredentials browser() { return new BrowserCredentials(user, accessToken, expiresIn); }
+    }
     private final AppUserRepository users;
     private final PasswordEncoder passwords;
     private final TokenService tokens;
     private final RefreshStore refresh;
     private final com.webeditor.collaboration.CollabControlEvents events;
+    private final org.springframework.transaction.support.TransactionTemplate transactions;
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
     /**
      * 初始化组件依赖及配置，供后续业务方法使用。
      *
@@ -33,8 +38,12 @@ public class AuthService {
      * @param refresh 刷新令牌存储服务
      */
     public AuthService(AppUserRepository users, PasswordEncoder passwords, TokenService tokens, RefreshStore refresh,
-            com.webeditor.collaboration.CollabControlEvents events) {
+            com.webeditor.collaboration.CollabControlEvents events,
+            org.springframework.transaction.PlatformTransactionManager transactionManager,
+            com.fasterxml.jackson.databind.ObjectMapper mapper) {
         this.users = users; this.passwords = passwords; this.tokens = tokens; this.refresh = refresh; this.events = events;
+        this.transactions = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        this.mapper = mapper;
     }
     /**
      * 规范化并校验注册信息，检查账号唯一性，编码密码后保存用户；并发唯一约束冲突转换为业务错误。
@@ -71,40 +80,70 @@ public class AuthService {
      * @param login 登录用户名或邮箱
      * @param password 密码明文，仅用于校验或编码
      */
-    @Transactional
     public Credentials login(String login, String password) {
         String normalized;
         try { normalized = IdentityInput.normalize(login, 254); } catch (IllegalArgumentException e) { throw unauthenticated(); }
         AppUser user = (normalized.contains("@") ? users.findByNormalizedEmail(normalized)
                 : users.findByNormalizedUsername(normalized)).orElseThrow(AuthService::unauthenticated);
-        if (password == null || !passwords.matches(password, user.getPasswordHash())) throw unauthenticated();
-        if (passwords.upgradeEncoding(user.getPasswordHash())) {
-            AppUser locked = users.lockById(user.getId()).orElseThrow(AuthService::unauthenticated);
-            if (!passwords.matches(password, locked.getPasswordHash())) throw unauthenticated();
-            locked.upgradeHash(passwords.encode(password)); user = locked;
-        }
-        return credentials(user, refresh.create(user.getId(), user.getTokenVersion()));
+        long userId = user.getId();
+        return transactions.execute(status -> {
+            AppUser locked = users.lockById(userId).orElseThrow(AuthService::unauthenticated);
+            if (password == null || !passwords.matches(password, locked.getPasswordHash())) throw unauthenticated();
+            if (passwords.upgradeEncoding(locked.getPasswordHash())) {
+                locked.upgradeHash(passwords.encode(password));
+            }
+            return credentials(locked, refresh.issue(locked.getId(), locked.getTokenVersion()));
+        });
     }
     /**
-     * 轮换刷新令牌并核对用户令牌版本，再生成新的访问凭据。
+     * 在用户写锁内准备凭据后原子轮换；事务结束失败按轮换结果不确定报告。
      *
      * @param credential 刷新令牌
      */
-    @Transactional(readOnly = true)
     public Credentials rotate(String credential) {
-        RefreshStore.Rotated rotated = refresh.rotate(credential);
-        AppUser user = users.findById(rotated.user().userId()).orElseThrow(AuthService::unauthenticated);
-        if (user.getTokenVersion() != rotated.user().tokenVersion()) throw unauthenticated();
-        return credentials(user, rotated.token());
+        boolean[] committed = { false };
+        try {
+            RefreshStore.Prepared prepared = refresh.inspect(credential);
+            return transactions.execute(status -> {
+                AppUser user = users.lockById(prepared.user().userId()).orElseThrow(AuthService::unauthenticated);
+                if (user.getTokenVersion() != prepared.user().tokenVersion()) throw unauthenticated();
+                String next = refresh.nextToken();
+                BrowserCredentials browser = new BrowserCredentials(UserView.of(user), tokens.issue(user), tokens.expiresIn());
+                try { mapper.writeValueAsBytes(com.webeditor.common.response.ApiResponse.ok(browser)); }
+                catch (java.io.IOException e) { throw new AuthFailure(503, "AUTH_SERVICE_UNAVAILABLE"); }
+                RefreshStore.Issued issued = refresh.commit(prepared, next);
+                committed[0] = true;
+                return new Credentials(browser.user(), browser.accessToken(), issued.token(), browser.expiresIn(), issued.cookieSeconds());
+            });
+        } catch (AuthFailure e) { throw e; }
+        catch (RuntimeException e) {
+            throw new AuthFailure(503, committed[0] ? "AUTH_REFRESH_OUTCOME_UNKNOWN" : "AUTH_SERVICE_UNAVAILABLE");
+        }
     }
     /**
      * 将用户公开资料、访问令牌、刷新令牌和有效期组合为登录凭据。
      *
      * @param user 用户实体
-     * @param refreshToken 刷新令牌
+     * @param issued 刷新令牌及 Cookie 剩余寿命
      */
-    private Credentials credentials(AppUser user, String refreshToken) {
-        return new Credentials(UserView.of(user), tokens.issue(user), refreshToken, tokens.expiresIn());
+    private Credentials credentials(AppUser user, RefreshStore.Issued issued) {
+        return new Credentials(UserView.of(user), tokens.issue(user), issued.token(), tokens.expiresIn(), issued.cookieSeconds());
+    }
+    /** Commit revocation before the controller reports success; stale versions cannot revoke new sessions. */
+    public String logoutCookie(String token) {
+        try {
+            RefreshStore.Prepared prepared = refresh.inspect(token);
+            return transactions.execute(status -> {
+                AppUser user = users.lockById(prepared.user().userId()).orElse(null);
+                if (user == null || user.getTokenVersion() != prepared.user().tokenVersion()) return "local-only";
+                refresh.inspect(token);
+                user.revoke(); events.revoked(user.getId(), null, user.getAuthzVersion());
+                return "revoked";
+            });
+        } catch (AuthFailure e) {
+            if (e.status() == 401) return "local-only";
+            throw e;
+        } catch (RuntimeException e) { throw new AuthFailure(503, "AUTH_SERVICE_UNAVAILABLE"); }
     }
     /**
      * 读取指定用户的公开资料，不存在时返回认证错误。

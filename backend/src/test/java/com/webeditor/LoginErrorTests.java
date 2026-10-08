@@ -32,11 +32,23 @@ class LoginErrorTests {
     @Test void missingAccountReturnsTheSameCredentialError() throws Exception {
         assertLoginFailure(new AuthFailure(401, "AUTHENTICATION_REQUIRED"));
     }
+    @Test void dependencyFailureIsNotReportedAsInvalidCredentials() throws Exception {
+        AuthenticationManager manager = mock(AuthenticationManager.class);
+        when(manager.authenticate(any())).thenThrow(new AuthFailure(503, "AUTH_SERVICE_UNAVAILABLE"));
+        var filter = new JsonAuthenticationFilter(manager, mock(AuthRateLimiter.class), errors, mapper,
+                new com.webeditor.common.security.BrowserCredentialsWriter(mapper, new com.webeditor.common.security.AuthCookie(false), errors));
+        var request = new MockHttpServletRequest("POST", "/api/auth/login"); request.setContentType("application/json");
+        request.setContent("{\"login\":\"account\",\"password\":\"password\"}".getBytes(StandardCharsets.UTF_8));
+        var response = new MockHttpServletResponse();
+        filter.doFilter(request, response, (req, res) -> { throw new AssertionError(); });
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getHeader("Set-Cookie")).isNull();
+    }
 
     private void assertLoginFailure(RuntimeException failure) throws Exception {
         AuthenticationManager manager = mock(AuthenticationManager.class);
         when(manager.authenticate(any())).thenThrow(failure);
-        var filter = new JsonAuthenticationFilter(manager, mock(AuthRateLimiter.class), errors, mapper);
+        var filter = new JsonAuthenticationFilter(manager, mock(AuthRateLimiter.class), errors, mapper, new com.webeditor.common.security.BrowserCredentialsWriter(mapper, new com.webeditor.common.security.AuthCookie(false), errors));
         var request = new MockHttpServletRequest("POST", "/api/auth/login");
         request.setContentType("application/json");
         request.setContent("{\"login\":\"test-account\",\"password\":\"wrong-password\"}"

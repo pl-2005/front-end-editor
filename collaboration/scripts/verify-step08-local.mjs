@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 /** Browser acceptance using the web-access CDP proxy, root .env and local services.
  * No credentials are written to disk or printed. Accounts/projects remain for inspection. */
 import assert from 'node:assert/strict'
@@ -16,7 +17,7 @@ const config = parseEnv(readFileSync(new URL('../../.env', import.meta.url), 'ut
 mkdirSync(root + '/.codex-build', { recursive: true })
 const storageSecret = randomBytes(32).toString('hex'), gatewaySecret = randomBytes(32).toString('hex'), initializerSecret = randomBytes(32).toString('hex')
 const base = 'http://127.0.0.1:18086', origin = 'http://127.0.0.1:15173', proxy = process.env.CDP_PROXY_URL || 'http://localhost:3456'
-const env = { ...process.env, ...config, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
+const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
   COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18092', COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18093/internal/initialize',
   COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret }
 const encoderEnv = {}
@@ -37,8 +38,9 @@ async function until(predicate, label, timeout = 20000) {
   while (Date.now() < end) { if (await predicate()) return; await new Promise(r => setTimeout(r, 150)) }
   throw new Error(`Acceptance timeout: ${label}`)
 }
+const authFetch = createAuthFetch(origin)
 async function api(path, method = 'GET', body, expected = 200) {
-  const response = await fetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+  const response = await authFetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) })
   const result = response.status === 204 ? undefined : await response.json()
   assert.equal(response.status, expected, `${method} ${path}: ${result?.code ?? 'unexpected status'}`)
@@ -61,7 +63,7 @@ async function click(label) {
   return evaluate(`const button=[...document.querySelectorAll('button')].find(x=>x.getAttribute('aria-label')===${JSON.stringify(label)}||x.textContent===${JSON.stringify(label)}); if(!button) throw new Error('Button missing'); button.click(); return true;`)
 }
 async function prompt(value) { await evaluate(`window.prompt=()=>${JSON.stringify(value)}; window.confirm=()=>true; return true;`) }
-async function durable() { await until(async () => (await evaluate(`return document.querySelector('.v2-workspace-status')?.textContent||'';`)).includes('已持久化'), 'durable confirmation') }
+async function durable() { await until(async () => (await evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' '))||'';`)).includes('已持久化'), 'durable confirmation') }
 async function stop(child) { if (child && child.exitCode === null) { const exited = once(child, 'exit'); child.kill(); await exited } }
 try {
   await until(async () => {
@@ -83,7 +85,7 @@ try {
     target = (await cdp('/new', origin + '/login')).targetId; targets.push(target)
     await evaluate(`const {login}=await import('/src/api/auth.ts');await login(${JSON.stringify(username)},${JSON.stringify(password)});history.pushState(null,'',${JSON.stringify(route)});window.dispatchEvent(new PopStateEvent('popstate'));return true;`)
     await evaluate(`window.confirm=()=>true;return true;`)
-    await until(async () => evaluate(`return document.querySelector('.v2-workspace-status')?.textContent.includes('在线')&&!!document.querySelector('.monaco-editor');`), 'online workspace', 60000)
+    await until(async () => evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('在线')&&!!document.querySelector('.monaco-editor');`), 'online workspace', 60000)
     await until(async () => evaluate(`let f=document.querySelector('.v2-workspace')?.[Object.keys(document.querySelector('.v2-workspace')||{}).find(k=>k.startsWith('__reactFiber'))];while(f&&!f.memoizedProps?.session)f=f.return;window.__step08Session=f?.memoizedProps.session;return !!window.__step08Session;`), 'workspace session')
   }
   await openWorkspace(); const first = target
@@ -146,7 +148,7 @@ try {
   await edit('/recovered.txt', 'survives fresh page'); await evaluate(`await window.__step08Session.flushLocal();return true;`)
   await cdp('/navigate?target=' + first, origin + '/login')
   await evaluate(`const {login}=await import('/src/api/auth.ts');await login(${JSON.stringify(username)},${JSON.stringify(password)});history.pushState(null,'',${JSON.stringify(route)});window.dispatchEvent(new PopStateEvent('popstate'));return true;`)
-  await until(async () => evaluate(`return document.querySelector('.v2-workspace-status')?.textContent.includes('在线');`), 'reload authorized merge')
+  await until(async () => evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('在线');`), 'reload authorized merge')
   await durable()
   await until(async () => evaluate(`let f=document.querySelector('.v2-workspace')?.[Object.keys(document.querySelector('.v2-workspace')||{}).find(k=>k.startsWith('__reactFiber'))];while(f&&!f.memoizedProps?.session)f=f.return;window.__step08Session=f?.memoizedProps.session;return !!window.__step08Session;`), 'restored session')
   assert.equal(await evaluate(`const {monaco:m}=await import('/src/editor/v2/languages.ts');return ${model('/recovered.txt')}.getValue();`), 'survives fresh page')
@@ -157,14 +159,14 @@ try {
   assert.ok([...saved.getMap('files').values()].some(f => f.get('path') === '/recovered.txt' && f.get('content').toString() === 'survives fresh page')); saved.destroy()
   console.log('PASS: gateway restart loads latest durable project files')
   await cdp(`/screenshot?target=${target}&file=${encodeURIComponent(root + '/.codex-build/step08-workspace.png')}`)
-  await api('/api/auth/logout', 'POST', undefined, 204)
+  await api('/api/auth/logout', 'POST', {}, 200)
   await until(async () => evaluate(`return window.__step08Session.state.connection==='forbidden'&&!document.querySelector('.monaco-editor');`), 'revocation clears editor', 10000)
   await until(async () => evaluate(`return !(await indexedDB.databases()).some(db=>db.name==='web-editor:'+window.__step08Session.userId+':${project.id}:1');`), 'revocation clears IndexedDB')
   assert.equal(await evaluate(`try{await window.__step08Session.exportFiles();return false}catch{return true}`), true)
   console.log('PASS: revoked session closes, memory/IndexedDB clear and export is denied')
   console.log(`Acceptance project ID: ${project.id}`)
 } catch (error) {
-  if (target) console.log('Browser status:', await evaluate(`return {status:document.querySelector('.v2-workspace-status')?.textContent,error:document.querySelector('.v2-error')?.textContent,files:[...document.querySelectorAll('.v2-file-panel li>button')].map(x=>x.textContent)};`).catch(() => 'unavailable'))
+  if (target) console.log('Browser status:', await evaluate(`return {status:([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')),error:document.querySelector('.v2-error')?.textContent,files:[...document.querySelectorAll('.v2-file-panel li>button')].map(x=>x.textContent)};`).catch(() => 'unavailable'))
   throw error
 } finally {
   // Only acceptance tabs belong to this script; the proxy and user tabs stay open.

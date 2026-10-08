@@ -152,7 +152,7 @@ node scripts/verify-step07-local.mjs
 
 ## Step08 本机浏览器验收
 
-本地日志使用 `web-editor:{userId}:{projectId}:{epoch}`，待确认更新预算为 1.5 MiB；缓存保存受限 Yjs 更新、待同步计数和恢复提示的 fileId，不保存身份凭据。多标签页原子合并缓存，持久化确认匹配后再清零计数。正常关闭工作区保留日志，授权失效清理日志及内容。重启浏览器后须重新登录；不支持完全离线登录。Sandpack 离线消费本地文档，首次运行仍需可用的运行依赖。
+本地日志使用 `web-editor:{userId}:{projectId}:{epoch}`，待确认更新预算为 1.5 MiB；缓存保存受限 Yjs 更新、待同步计数和恢复提示的 fileId，不保存身份凭据。多标签页原子合并缓存，持久化确认匹配后再清零计数。正常关闭工作区保留日志，授权失效清理日志及内容。重启浏览器后可在 Cookie/服务端会话仍有效时恢复身份；恢复后重新授权项目并申请票据，不支持完全离线登录。Sandpack 离线消费本地文档，首次运行仍需可用的运行依赖。
 
 Awareness 的 user 增加服务端绑定的 connectionId，ready.identity 同时提供该字段；相对选区允许 Yjs 正常编码的 `tname: null`。前端按用户和连接显示成员及远端光标，远端删除时可恢复为新文件或验证访问权后复制，恢复提示在重新打开后保留。
 
@@ -229,3 +229,7 @@ node scripts/verify-step10-local.mjs --browser
 Step11 已交付发布包/校验、同源路由、回滚说明及完整本机验收。先在仓库根运行 `./collaboration/scripts/build-step11.ps1`；在本目录运行 `npm run verify:step11`（需要 web-access CDP proxy），再执行 `npm run start:local`，打开 `http://127.0.0.1:15175`。
 
 启动器读取仓库根 `.env` 的本机 MySQL/MinIO/Redis 和 JWT/HMAC 配置，使用构建后的静态前端。内部端口只绑定 loopback，内部路径在入口阻断；不会改写根 `.env`。本机运行与验收使用同一组端口，不能并行启动。正常停止先 flush 网关，失败时保持依赖进程并重试。完整发布/回滚/备份/监控及本机使用见 [Step11 操作说明](../docs/V__2/step11-release.md)。生产部署不在本次用户指定范围内。
+
+## 浏览器会话恢复验收
+
+认证修改请求使用精确 Origin、自定义头与内存 Cookie jar，旧 refreshToken JSON 已停止。node scripts/verify-auth-session-local.mjs 使用根 .env 和本机 MySQL/MinIO/Redis，覆盖真实 Chrome 多页恢复、并发轮换、退出待确认、密码撤权、离线队列保留与重放、关闭锁持有页及加速寿命边界；运行方法与范围见 [验收记录](../docs/auth-session/verification.md)。

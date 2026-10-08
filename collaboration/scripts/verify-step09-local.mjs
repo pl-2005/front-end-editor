@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -18,7 +19,7 @@ const config = parseEnv(readFileSync(new URL('../../.env', import.meta.url), 'ut
 mkdirSync(root + '/.codex-build', { recursive: true })
 const storageSecret = randomBytes(32).toString('hex'), gatewaySecret = randomBytes(32).toString('hex'), initializerSecret = randomBytes(32).toString('hex')
 const base = 'http://127.0.0.1:18089', origin = 'http://localhost:5173'
-const env = { ...process.env, ...config, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
+const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
   COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18094', COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18095/internal/initialize',
   COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret }
 const encoderEnv = {}
@@ -38,8 +39,9 @@ async function until(predicate, timeout = 10000) {
   while (Date.now() < end) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)) }
   throw new Error('Step09 local acceptance condition timeout')
 }
+const authFetch = createAuthFetch(origin)
 async function api(user, path, method = 'GET', body, expected = 200, headers = {}) {
-  const response = await fetch(base + path, { method, headers: { ...(user ? { Authorization: `Bearer ${user.token}` } : {}),
+  const response = await authFetch(base + path, { method, headers: { ...(user ? { Authorization: `Bearer ${user.token}` } : {}),
     ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20000) })
   const result = response.status === 204 ? undefined : await response.json()
   assert.equal(response.status, expected, `${method} ${path}: ${result?.code ?? 'unexpected status'}`)
@@ -139,7 +141,7 @@ try {
   member.password = newPassword; await until(() => revoked.closed); assert.equal(valid.provider.isSynced, true)
   assert.equal(revoked.closeReason, 'COLLAB_USER_REVOKED', 'password change must use the active Outbox event')
   await login(member); revoked = await connect(member, live.id)
-  await api(member, '/api/auth/logout', 'POST', undefined, 204)
+  await api(member, '/api/auth/logout', 'POST', {}, 200)
   await until(() => revoked.closed); assert.equal(valid.provider.isSynced, true)
   assert.equal(revoked.closeReason, 'COLLAB_USER_REVOKED', 'logout must use the active Outbox event')
   edit(valid, '<!-- live after all revocations -->\n')

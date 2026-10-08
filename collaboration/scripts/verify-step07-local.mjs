@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 /** Browser acceptance using the web-access CDP proxy, root .env and local services.
  * No credentials are written to disk or printed. Accounts/projects remain for inspection. */
 import assert from 'node:assert/strict'
@@ -16,7 +17,7 @@ const config = parseEnv(readFileSync(new URL('../../.env', import.meta.url), 'ut
 mkdirSync(root + '/.codex-build', { recursive: true })
 const storageSecret = randomBytes(32).toString('hex'), gatewaySecret = randomBytes(32).toString('hex'), initializerSecret = randomBytes(32).toString('hex')
 const base = 'http://127.0.0.1:18086', origin = 'http://127.0.0.1:15173', proxy = process.env.CDP_PROXY_URL || 'http://localhost:3456'
-const env = { ...process.env, ...config, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
+const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
   COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18092', COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18093/internal/initialize',
   COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret }
 const encoderEnv = {}
@@ -36,8 +37,9 @@ async function until(predicate, label, timeout = 20000) {
   while (Date.now() < end) { if (await predicate()) return; await new Promise(r => setTimeout(r, 150)) }
   throw new Error(`Acceptance timeout: ${label}`)
 }
+const authFetch = createAuthFetch(origin)
 async function api(path, method = 'GET', body, expected = 200) {
-  const response = await fetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+  const response = await authFetch(base + path, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000) })
   const result = response.status === 204 ? undefined : await response.json()
   assert.equal(response.status, expected, `${method} ${path}: ${result?.code ?? 'unexpected status'}`)
@@ -60,7 +62,7 @@ async function click(label) {
   return evaluate(`const button=[...document.querySelectorAll('button')].find(x=>x.getAttribute('aria-label')===${JSON.stringify(label)}||x.textContent===${JSON.stringify(label)}); if(!button) throw new Error('Button missing'); button.click(); return true;`)
 }
 async function prompt(value) { await evaluate(`window.prompt=()=>${JSON.stringify(value)}; window.confirm=()=>true; return true;`) }
-async function durable() { await until(async () => (await evaluate(`return document.querySelector('.v2-workspace-status')?.textContent||'';`)).includes('已持久化'), 'durable confirmation') }
+async function durable() { await until(async () => (await evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' '))||'';`)).includes('已持久化'), 'durable confirmation') }
 async function markers(path) { return evaluate(`const {monaco:m}=await import('/src/editor/v2/languages.ts'); return m.editor.getModelMarkers({resource:${model(path)}.uri}).map(x=>({message:x.message,code:x.code}));`) }
 async function completion(path, code, offset, expected) {
   await edit(path, code)
@@ -88,7 +90,7 @@ try {
   const project = await api(`/api/teams/${team.id}/projects`, 'POST', { name: 'Step07 workspace', template: 'vanilla', entry: '/index.html' }, 201)
   target = (await cdp('/new', origin + '/login')).targetId
   await evaluate(`const {login}=await import('/src/api/auth.ts'); await login(${JSON.stringify(username)},${JSON.stringify(password)}); history.pushState(null,'', '/teams/${team.id}/projects/${project.id}'); window.dispatchEvent(new PopStateEvent('popstate')); return true;`)
-  await until(async () => (await evaluate(`return !!document.querySelector('.monaco-editor') && document.querySelector('.v2-workspace-status')?.textContent.includes('在线');`)), 'editor and ticket sync', 60000)
+  await until(async () => (await evaluate(`return !!document.querySelector('.monaco-editor') && ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('在线');`)), 'editor and ticket sync', 60000)
   await durable()
   console.log('PASS: authenticated project workspace, schema, ticket connection and initial durable state')
   await completion('/index.html', '<di', 3, 'div')
@@ -141,25 +143,25 @@ try {
   assert.ok(![...saved.getMap('files').values()].some(f => f.get('path') === '/package.json'))
   saved.destroy()
   await gateway.stop(); gateway = createGateway(options); await gateway.server.listen()
-  await until(async () => (await evaluate(`return document.querySelector('.v2-workspace-status')?.textContent||'';`)).includes('在线'), 'fresh-ticket reconnect')
+  await until(async () => (await evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' '))||'';`)).includes('在线'), 'fresh-ticket reconnect')
   await durable()
   await evaluate(`history.pushState(null,'','/teams/${team.id}'); window.dispatchEvent(new PopStateEvent('popstate')); return true;`)
   await until(async () => evaluate(`const {monaco:m}=await import('/src/editor/v2/languages.ts'); return m.editor.getModels().length===0 && m.editor.getEditors().length===0;`), 'workspace disposal')
   await evaluate(`history.pushState(null,'','/teams/${team.id}/projects/${project.id}');window.dispatchEvent(new PopStateEvent('popstate'));return true;`)
-  await until(async () => evaluate(`return document.querySelector('.v2-workspace-status')?.textContent.includes('在线')||false;`), 'workspace remount')
+  await until(async () => evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('在线')||false;`), 'workspace remount')
   await completion('/index.js', 'document.querySel', 17, 'querySelector')
   await edit('/index.js', 'console.log("Step07 preview");'); await durable()
   await click('Client')
   await until(async () => (await evaluate(`return document.querySelector('.v2-preview-pane')?.textContent||'';`)).includes('Step07 preview'), 'remounted preview runtime', 90000)
   await cdp(`/screenshot?target=${target}&file=${encodeURIComponent(root + '/.codex-build/step07-workspace.png')}`)
-  await api('/api/auth/logout', 'POST', undefined, 204)
-  await until(async () => evaluate(`const {monaco:m}=await import('/src/editor/v2/languages.ts');const {getAuthUser}=await import('/src/api/auth.ts');return (document.querySelector('.v2-workspace-status')?.textContent.includes('授权失效')||!getAuthUser())&&m.editor.getModels().length===0;`), 'authorization revocation clears models')
+  await api('/api/auth/logout', 'POST', {}, 200)
+  await until(async () => evaluate(`const {monaco:m}=await import('/src/editor/v2/languages.ts');const {getAuthUser}=await import('/src/api/auth.ts');return (([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('授权失效')||!getAuthUser())&&m.editor.getModels().length===0;`), 'authorization revocation clears models')
   console.log('PASS: server-side authorization revocation stops editing and clears models')
   console.log('PASS: MySQL/MinIO current files, gateway restart, new ticket and project cleanup')
   console.log(`Acceptance project ID: ${project.id}`)
 } catch (error) {
   if (target) {
-    console.log('Browser diagnostic summary:', await evaluate(`const {monaco:m}=await import('/src/editor/v2/languages.ts'); const el=document.querySelector('.v2-preview-pane');let f=el?.[Object.keys(el||{}).find(x=>x.startsWith('__reactFiber'))],runtime;while(f&&!runtime){for(let d=f.dependencies?.firstContext;d;d=d.next)if(d.memoizedValue?.files){const s=d.memoizedValue;runtime={status:s.status,error:s.error,clients:Object.values(s.clients).map(c=>({status:c.status})),files:Object.fromEntries(Object.entries(s.files).map(([p,v])=>[p,typeof v==='string'?v.slice(0,80):v.code.slice(0,80)]))};break;}f=f.return;}return {state:document.querySelector('.v2-workspace-status')?.textContent,preview:el?.textContent,iframes:[...document.querySelectorAll('iframe')].map(x=>({src:x.src,width:x.clientWidth,height:x.clientHeight})),runtime,markers:m.editor.getModelMarkers({}).map(x=>({message:x.message,code:x.code}))};`).catch(() => 'unavailable'))
+    console.log('Browser diagnostic summary:', await evaluate(`const {monaco:m}=await import('/src/editor/v2/languages.ts'); const el=document.querySelector('.v2-preview-pane');let f=el?.[Object.keys(el||{}).find(x=>x.startsWith('__reactFiber'))],runtime;while(f&&!runtime){for(let d=f.dependencies?.firstContext;d;d=d.next)if(d.memoizedValue?.files){const s=d.memoizedValue;runtime={status:s.status,error:s.error,clients:Object.values(s.clients).map(c=>({status:c.status})),files:Object.fromEntries(Object.entries(s.files).map(([p,v])=>[p,typeof v==='string'?v.slice(0,80):v.code.slice(0,80)]))};break;}f=f.return;}return {state:([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')),preview:el?.textContent,iframes:[...document.querySelectorAll('iframe')].map(x=>({src:x.src,width:x.clientWidth,height:x.clientHeight})),runtime,markers:m.editor.getModelMarkers({}).map(x=>({message:x.message,code:x.code}))};`).catch(() => 'unavailable'))
     await cdp(`/screenshot?target=${target}&file=${encodeURIComponent(root + '/.codex-build/step07-failure.png')}`).catch(() => {})
   }
   throw error

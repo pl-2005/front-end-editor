@@ -2,6 +2,24 @@ import 'fake-indexeddb/auto'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
+// Serialize test locks, including abortable waiters, like the browser Web Locks API.
+let authLock: Promise<unknown> = Promise.resolve()
+Object.defineProperty(navigator, 'locks', {
+  configurable: true,
+  value: {
+    request: (_name: string, options: { signal?: AbortSignal }, callback: () => unknown) => {
+      const pending = authLock
+        .catch(() => {})
+        .then(() => {
+          if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+          return callback()
+        })
+      authLock = pending
+      return pending
+    },
+  },
+})
+
 // Ant Design 的响应式布局在浏览器中订阅媒体查询。
 Object.defineProperty(window, 'matchMedia', {
   writable: true,

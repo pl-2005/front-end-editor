@@ -47,7 +47,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         String method = request.getMethod();
         return !path.startsWith("/api/") || "OPTIONS".equals(method)
-                || "POST".equals(method) && (path.equals("/api/auth/register") || path.equals("/api/auth/login") || path.equals("/api/auth/refresh"))
+                || "POST".equals(method) && (path.equals("/api/auth/register") || path.equals("/api/auth/login") || path.equals("/api/auth/refresh") || path.equals("/api/auth/logout"))
                 || "GET".equals(method) && (path.equals("/api/health") || path.equals("/api/health/readiness") || path.equals("/api/teams/discover"));
     }
     /**
@@ -77,6 +77,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             Number version = jwt.getClaim("token_version");
             if (version == null || user.getTokenVersion() != version.longValue()) throw new IllegalArgumentException();
             authenticatedId = id;
+        } catch (org.springframework.dao.DataAccessException | org.springframework.transaction.TransactionException exception) {
+            errors.write(request, response, 503, "AUTH_SERVICE_UNAVAILABLE");
+            return;
         } catch (Exception exception) {
             errors.write(request, response, 401, "AUTHENTICATION_REQUIRED");
             return;

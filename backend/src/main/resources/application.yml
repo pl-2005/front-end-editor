@@ -45,6 +45,9 @@ editor:
       confirmation-window: ${COLLAB_CONFIRMATION_WINDOW:24h}
       cron: ${COLLAB_CLEANUP_CRON:0 0 4 * * *}
   auth:
+    cookie-secure: ${AUTH_COOKIE_SECURE:true}
+    local-development: ${AUTH_LOCAL_DEVELOPMENT:false}
+    allowed-origins: ${AUTH_ALLOWED_ORIGINS}
     issuer: ${JWT_ISSUER:web-editor}
     audience: ${JWT_AUDIENCE:web-editor-api}
     access-ttl: ${JWT_ACCESS_TTL:10m}

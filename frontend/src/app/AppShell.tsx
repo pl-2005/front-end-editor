@@ -8,18 +8,21 @@ import {
   UpOutlined,
 } from '@ant-design/icons'
 import { Button, Layout, Menu } from 'antd'
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { logout } from '../api/auth'
+import { getAuthError, logout, refreshCredentials, subscribeAuth } from '../api/auth'
 import { useAuthUser } from '../hooks/useAuthUser'
 import { useTask } from '../hooks/useTask'
+import { useNotice } from '../ui/useNotice'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [topbarCollapsed, setTopbarCollapsed] = useState(false)
   const user = useAuthUser()
+  const authError = useSyncExternalStore(subscribeAuth, getAuthError)
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const task = useTask()
+  const show = useNotice()
   const selected = pathname.startsWith('/teams') ? '/teams' : pathname
   return (
     <Layout className="v2-shell">
@@ -81,7 +84,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               disabled={task.busy}
               onClick={() =>
                 void task.run(async () => {
-                  await logout()
+                  const result = await logout()
+                  if (result.outcome === 'revoked') show('已退出登录', 'success')
                   navigate('/login', { replace: true })
                 })
               }
@@ -101,7 +105,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onClick={() => setTopbarCollapsed((value) => !value)}
         />
       </Layout.Header>
-      <Layout.Content className="v2-content">{children}</Layout.Content>
+      <Layout.Content className="v2-content">
+        {user && authError && (
+          <div role="alert">
+            {authError}{' '}
+            <Button
+              onClick={() => {
+                void refreshCredentials(true).catch(() => {})
+              }}
+            >
+              重试登录会话
+            </Button>
+            <Link to="/login" state={{ reauthenticate: true }}>
+              重新登录
+            </Link>
+          </div>
+        )}
+        {children}
+      </Layout.Content>
     </Layout>
   )
 }

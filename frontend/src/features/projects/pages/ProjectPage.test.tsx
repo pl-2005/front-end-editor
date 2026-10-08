@@ -72,7 +72,7 @@ afterEach(() => {
   observed.props.length = 0
 })
 it('preserves the workspace and portal for metadata changes, replaces them for epoch, project and identity changes', async () => {
-  setCredentials({ user, accessToken: 'test', refreshToken: 'test', expiresIn: 600 })
+  setCredentials({ user, accessToken: 'test', expiresIn: 600 })
   observed.project = project
   const ui = (
     <StrictMode>
@@ -148,7 +148,6 @@ it('preserves the workspace and portal for metadata changes, replaces them for e
     setCredentials({
       user: { ...user, id: 5 },
       accessToken: 'new',
-      refreshToken: 'new',
       expiresIn: 600,
     })
   })

@@ -26,6 +26,7 @@ public class JsonAuthenticationFilter extends OncePerRequestFilter {
     private final AuthRateLimiter limiter;
     private final SecurityErrors errors;
     private final ObjectMapper mapper;
+    private final BrowserCredentialsWriter writer;
     /**
      * 初始化组件依赖及配置，供后续业务方法使用。
      *
@@ -35,8 +36,9 @@ public class JsonAuthenticationFilter extends OncePerRequestFilter {
      * @param mapper JSON 序列化器
      */
     public JsonAuthenticationFilter(AuthenticationManager manager, AuthRateLimiter limiter,
-            SecurityErrors errors, ObjectMapper mapper) {
+            SecurityErrors errors, ObjectMapper mapper, BrowserCredentialsWriter writer) {
         this.manager = manager; this.limiter = limiter; this.errors = errors; this.mapper = mapper;
+        this.writer = writer;
     }
     /**
      * 仅拦截 POST 登录请求，其他请求跳过 JSON 登录认证。
@@ -64,7 +66,7 @@ public class JsonAuthenticationFilter extends OncePerRequestFilter {
         try {
             byte[] raw = request.getInputStream().readNBytes(8193);
             if (raw.length > 8192) { errors.write(request, response, 400, "VALIDATION_FAILED"); return; }
-            body = mapper.readTree(raw);
+            body = mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(raw);
         }
         catch (Exception e) { errors.write(request, response, 400, "VALIDATION_FAILED"); return; }
         if (body == null || !body.isObject() || body.size() != 2 || !body.hasNonNull("login")
@@ -83,12 +85,14 @@ public class JsonAuthenticationFilter extends OncePerRequestFilter {
             response.setStatus(200);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.setCharacterEncoding("UTF-8");
-            mapper.writeValue(response.getOutputStream(), ApiResponse.ok((AuthService.Credentials) authenticated.getPrincipal()));
+            writer.write(request, response, (AuthService.Credentials) authenticated.getPrincipal(), false);
         } catch (AuthRateLimiter.Limited e) {
             response.setHeader("Retry-After", Long.toString(e.retryAfter()));
             errors.write(request, response, 429, "AUTH_RATE_LIMITED");
-        } catch (BadCredentialsException | AuthFailure e) {
+        } catch (BadCredentialsException e) {
             errors.write(request, response, 401, "INVALID_CREDENTIALS");
+        } catch (AuthFailure e) {
+            errors.write(request, response, e.status(), e.status() == 401 ? "INVALID_CREDENTIALS" : e.code());
         } catch (Exception e) {
             errors.write(request, response, 503, "AUTH_SERVICE_UNAVAILABLE");
         } finally { SecurityContextHolder.clearContext(); }

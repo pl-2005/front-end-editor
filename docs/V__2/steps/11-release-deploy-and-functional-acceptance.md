@@ -33,3 +33,5 @@
 ## 交付后
 
 监控当前 Y.Doc 指针、对象 hash、generation、持久化 pending、房间连接和 Outbox lag；按需要处理孤儿对象与密钥轮换。生产故障以 projectId/epoch/generation/requestId 定位，不能手工改对象或数据库指针。
+
+后续更新（2026-10-08）：本文保留步骤完成时的历史行为。浏览器 Cookie 会话恢复改造及实际验收见 [会话方案](../../auth-session/README.md) 和 [验收记录](../../auth-session/verification.md)。

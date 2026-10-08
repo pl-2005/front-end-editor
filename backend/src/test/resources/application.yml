@@ -21,6 +21,9 @@ spring:
 
 editor:
   auth:
+    cookie-secure: false
+    local-development: true
+    allowed-origins: http://localhost:5173
     issuer: web-editor
     audience: web-editor-api
     access-ttl: 10m

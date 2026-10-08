@@ -73,7 +73,7 @@ describe('V2 routes', () => {
 
   it('returns to parent routes on direct entry and disables the button at the top level', async () => {
     window.history.replaceState(null, '', '/teams/9/projects/17')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const team = { id: 9, name: 'Team', description: null, joinPolicy: 'REQUEST' }
     vi.stubGlobal(
       'fetch',
@@ -103,7 +103,7 @@ describe('V2 routes', () => {
 
   it.each(['/teams', '/teams/9'])('edits team name and description from %s', async (route) => {
     window.history.replaceState(null, '', route)
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     let team = {
       id: 9,
       name: 'Original team',
@@ -154,7 +154,7 @@ describe('V2 routes', () => {
 
   it.each(['/teams', '/teams/9'])('hides team editing for members on %s', async (route) => {
     window.history.replaceState(null, '', route)
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const team = { id: 9, name: 'Member team', role: 'MEMBER' }
     vi.stubGlobal(
       'fetch',
@@ -174,7 +174,7 @@ describe('V2 routes', () => {
 
   it('manages projects from the table without triggering row navigation', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     let project = {
       id: 17,
       name: 'Original',
@@ -254,7 +254,7 @@ describe('V2 routes', () => {
 
   it('keeps all team operations locked until the project copy and its reload finish', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     let finishCopy!: (response: Response) => void
     let finishReload!: (response: Response) => void
     const copy = new Promise<Response>((resolve) => {
@@ -329,7 +329,7 @@ describe('V2 routes', () => {
     'cleans up project permission failures through the page executor at %s and reports once',
     async (route) => {
       window.history.replaceState(null, '', route)
-      setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+      setCredentials({ user, accessToken: 'access', expiresIn: 600 })
       vi.stubGlobal(
         'fetch',
         vi.fn((path: string) => {
@@ -368,7 +368,7 @@ describe('V2 routes', () => {
 
   it.each(['click', 'keyboard'])('opens a project using a table row %s', async (method) => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     vi.stubGlobal(
       'fetch',
       vi.fn((path: string) => {
@@ -394,7 +394,7 @@ describe('V2 routes', () => {
     'creates a project with description %s',
     async (description) => {
       window.history.replaceState(null, '', '/teams/9')
-      setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+      setCredentials({ user, accessToken: 'access', expiresIn: 600 })
       const project = {
         id: 17,
         name: 'New project',
@@ -478,7 +478,7 @@ describe('V2 routes', () => {
 
   it('retries the reserved project after initialization fails', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const project = {
       id: 18,
       name: 'Retry project',
@@ -523,7 +523,7 @@ describe('V2 routes', () => {
 
   it('saves name and description together through the edit icon after validating the name', async () => {
     window.history.replaceState(null, '', '/teams/9/projects/17')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const project = {
       id: 17,
       name: 'Original',
@@ -596,7 +596,7 @@ describe('V2 routes', () => {
 
   it('edits and clears descriptions while preserving project metadata and using the latest version', async () => {
     window.history.replaceState(null, '', '/teams/9/projects/17')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     let project = {
       id: 17,
       name: 'Original',
@@ -734,7 +734,7 @@ describe('V2 routes', () => {
 
   it('retire old invitation links and clear their fragments', async () => {
     window.history.replaceState(null, '', '/invite#token=secret-invite')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
     render(<App />)
@@ -745,7 +745,7 @@ describe('V2 routes', () => {
 
   it('shows an incoming invitation and accepts it by ID', async () => {
     window.history.replaceState(null, '', '/invitations')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
       if (path === '/api/teams/invitations/me')
         return Promise.resolve(
@@ -784,7 +784,7 @@ describe('V2 routes', () => {
 
   it('lets recipients reject an invitation', async () => {
     window.history.replaceState(null, '', '/invitations')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
       if (path === '/api/teams/invitations/me')
         return Promise.resolve(
@@ -808,7 +808,7 @@ describe('V2 routes', () => {
 
   it('lets owners find multiple users by a partial username and invite the chosen account', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const team = { id: 9, name: 'Team', description: null, joinPolicy: 'REQUEST' }
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
       if (path === '/api/teams/9') return Promise.resolve(ok(team))
@@ -868,7 +868,7 @@ describe('V2 routes', () => {
 
   it('debounces invitation searches, ignores stale replies and clears the results', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     let resolveOldSearch!: (response: Response) => void
     const oldSearch = new Promise<Response>((resolve) => {
       resolveOldSearch = resolve
@@ -925,7 +925,7 @@ describe('V2 routes', () => {
 
   it('shows no-user feedback without sending an invitation', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
       void init
       if (path === '/api/teams/9')
@@ -966,7 +966,7 @@ describe('V2 routes', () => {
     'shows the invitation conflict reason: %s',
     async (reason) => {
       window.history.replaceState(null, '', '/teams/9')
-      setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+      setCredentials({ user, accessToken: 'access', expiresIn: 600 })
       const fetcher = vi.fn((path: string, init?: RequestInit) => {
         if (path === '/api/teams/9')
           return Promise.resolve(
@@ -1006,7 +1006,7 @@ describe('V2 routes', () => {
 
   it('paginates discovery on the server and resets searches without showing stale responses', async () => {
     window.history.replaceState(null, '', '/discover')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const pageData = (page: number) => ({
       content: Array.from({ length: 10 }, (_, index) => ({
         id: page * 10 + index + 1,
@@ -1092,7 +1092,7 @@ describe('V2 routes', () => {
 
   it('defaults to ten teams and resets to page one when changing page size', async () => {
     window.history.replaceState(null, '', '/discover')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const fetcher = vi.fn((path: string) => {
       if (path === '/api/teams/join-requests/me') return Promise.resolve(ok([]))
       if (path.startsWith('/api/teams/discover?')) {
@@ -1141,7 +1141,7 @@ describe('V2 routes', () => {
 
   it('shows the member conflict when applying to a team the user already belongs to', async () => {
     window.history.replaceState(null, '', '/discover')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     vi.stubGlobal(
       'fetch',
       vi.fn((path: string, init?: RequestInit) => {
@@ -1184,7 +1184,7 @@ describe('V2 routes', () => {
     'prefers the API message or uses the fallback for %s / %s',
     async (status, code, responseMessage, expected) => {
       window.history.replaceState(null, '', '/discover')
-      setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+      setCredentials({ user, accessToken: 'access', expiresIn: 600 })
       vi.stubGlobal(
         'fetch',
         vi.fn((path: string) => {
@@ -1206,7 +1206,7 @@ describe('V2 routes', () => {
 
   it('shows member list but hides owner controls from members', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const fetcher = vi.fn((path: string) => {
       if (path === '/api/teams/9')
         return Promise.resolve(
@@ -1237,7 +1237,7 @@ describe('V2 routes', () => {
 
   it('clears a removed member view after the next denied action', async () => {
     window.history.replaceState(null, '', '/teams/9')
-    setCredentials({ user, accessToken: 'access', refreshToken: 'refresh', expiresIn: 600 })
+    setCredentials({ user, accessToken: 'access', expiresIn: 600 })
     const fetcher = vi.fn((path: string, init?: RequestInit) => {
       if (path === '/api/teams/9')
         return Promise.resolve(

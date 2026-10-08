@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -23,7 +24,7 @@ mkdirSync(root + '/.codex-build', { recursive: true })
 const storageSecret = randomBytes(32).toString('hex'), gatewaySecret = randomBytes(32).toString('hex'), initializerSecret = randomBytes(32).toString('hex')
 const maintenanceSecret = randomBytes(32).toString('hex')
 const base = 'http://127.0.0.1:18098', origin = 'http://127.0.0.1:15175'
-const env = { ...process.env, ...config, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
+const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
   COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18099', COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18100/internal/initialize',
   AUTH_REDIS_NAMESPACE: (config.AUTH_REDIS_NAMESPACE ?? 'web-editor:auth') + ':step11:' + randomBytes(6).toString('hex'),
   COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret, COLLAB_MAINTENANCE_SECRET: maintenanceSecret, COLLAB_MAINTENANCE_ENABLED: 'false' }
@@ -44,8 +45,9 @@ async function until(predicate, timeout = 10000) {
   while (Date.now() < end) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)) }
   throw new Error('Step11 local acceptance condition timeout')
 }
+const authFetch = createAuthFetch(origin)
 async function api(user, path, method = 'GET', body, expected = 200, headers = {}) {
-  const response = await fetch(origin + path, { method, headers: { ...(user ? { Authorization: `Bearer ${user.token}` } : {}),
+  const response = await authFetch(origin + path, { method, headers: { ...(user ? { Authorization: `Bearer ${user.token}` } : {}),
     ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20000) })
   const result = response.status === 204 ? undefined : await response.json()
   assert.equal(response.status, expected, `${method} ${path}: ${result?.code ?? 'unexpected status'}`)
@@ -55,7 +57,7 @@ async function account(label) {
   const name = 's11_' + label + '_' + randomBytes(5).toString('hex'), password = randomBytes(20).toString('hex')
   await api(null, '/api/auth/register', 'POST', { username: name, email: name + '@example.test', password }, 201)
   const login = await api(null, '/api/auth/login', 'POST', { login: name, password })
-  return { id: login.user.id, name, password, refresh: login.refreshToken, token: login.accessToken }
+  return { id: login.user.id, name, password, token: login.accessToken }
 }
 async function login(user) { user.token = (await api(null, '/api/auth/login', 'POST', { login: user.name, password: user.password })).accessToken }
 async function join(owner, member, teamId) {
@@ -128,8 +130,8 @@ async function identityAcceptance(owner, member, teamId) {
   const latest = await mysql("SELECT MAX(CAST(version AS UNSIGNED)) FROM flyway_schema_history WHERE success=1; SELECT COUNT(*) FROM project_revision; SELECT COALESCE(MIN(id),0) FROM project WHERE team_id IS NULL;")
   assert.equal(latest[0], 13); baselineRevisions = latest[1]; legacyId = latest[2]
   await api(null, '/api/teams', 'GET', undefined, 401)
-  const refreshed = await api(null, '/api/auth/refresh', 'POST', { refreshToken: owner.refresh })
-  owner.token = refreshed.accessToken; assert.ok(refreshed.refreshToken !== owner.refresh, 'STEP11_REFRESH_NOT_ROTATED'); owner.refresh = refreshed.refreshToken
+  const refreshed = await api(owner, '/api/auth/refresh', 'POST', {})
+  owner.token = refreshed.accessToken; assert.equal(refreshed.refreshToken, undefined, 'STEP11_REFRESH_JSON_LEAK')
   const request = await api(member, `/api/teams/${teamId}/join-requests`, 'POST', undefined, 201)
   await api(member, `/api/teams/${teamId}/projects`, 'GET', undefined, 404)
   await api(owner, `/api/teams/${teamId}/join-requests/${request.id}/approve`, 'POST', undefined, 204)
@@ -198,7 +200,7 @@ async function browserAcceptance(owner, team, project) {
   await evaluate(`document.querySelector('input[name="login"]').value=${JSON.stringify(owner.name)};document.querySelector('input[name="password"]').value=${JSON.stringify(owner.password)};document.querySelector('form').requestSubmit();return true;`)
   await until(async () => evaluate(`return location.pathname==='/teams';`), 30000)
   await evaluate(`history.pushState(null,'',${JSON.stringify(`/teams/${team.id}/projects/${project.id}`)});window.dispatchEvent(new PopStateEvent('popstate'));return true;`)
-  await until(async () => evaluate(`return document.querySelector('.v2-workspace-status')?.textContent.includes('在线')&&!!document.querySelector('.monaco-editor');`), 60000)
+  await until(async () => evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('在线')&&!!document.querySelector('.monaco-editor');`), 60000)
   await until(async () => evaluate(`let f=document.querySelector('.v2-workspace')?.[Object.keys(document.querySelector('.v2-workspace')||{}).find(k=>k.startsWith('__reactFiber'))];while(f&&!f.memoizedProps?.session)f=f.return;window.__step11Session=f?.memoizedProps.session;return !!window.__step11Session;`))
   const monacoAsset = readdirSync(frontendDirectory + '/assets').find(name => /^editor\.api-.*\.js$/.test(name))
   assert.ok(monacoAsset, 'STEP11_MONACO_ASSET_MISSING')
@@ -226,7 +228,7 @@ async function browserAcceptance(owner, team, project) {
   passed('built HTML/CSS/JS workers, completions, diagnostics and JS checkJs')
   await evaluate(`window.__step11Session.mutate(doc=>{for(const f of doc.getMap('files').values())if(f.get('path')==='/index.js'){const t=f.get('content');t.delete(0,t.length);t.insert(0,'console.log("Step11 production preview ready");')}});return true;`)
   await until(async () => evaluate(`return document.querySelector('.v2-preview-pane')?.textContent.includes('Step11 production preview ready');`), 60000)
-  await until(async () => evaluate(`return document.querySelector('.v2-workspace-status')?.textContent.includes('已持久化');`))
+  await until(async () => evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('已持久化');`))
   assert.equal(await evaluate(`return !/版本列表|历史恢复|版本比较|检查点|回退版本/.test(document.body.textContent);`), true)
   const frames = await evaluate(`return [...document.querySelectorAll('.v2-preview-boundary iframe')].map(f=>({sandbox:f.getAttribute('sandbox'),policy:f.referrerPolicy,sameOrigin:new URL(f.src).origin===location.origin}));`)
   assert.ok(frames.length); for (const f of frames) { assert.equal(f.sandbox, 'allow-scripts allow-same-origin allow-forms'); assert.equal(f.policy, 'no-referrer'); assert.equal(f.sameOrigin, false) }
@@ -239,7 +241,7 @@ async function browserAcceptance(owner, team, project) {
   await evaluate(`document.querySelector('input[name="login"]').value=${JSON.stringify(owner.name)};document.querySelector('input[name="password"]').value=${JSON.stringify(owner.password)};document.querySelector('form').requestSubmit();return true;`)
   await until(async () => evaluate(`return location.pathname==='/teams';`))
   await evaluate(`history.pushState(null,'',${JSON.stringify(`/teams/${team.id}/projects/${project.id}`)});window.dispatchEvent(new PopStateEvent('popstate'));return true;`)
-  await until(async () => evaluate(`return document.querySelector('.v2-workspace-status')?.textContent.includes('已持久化');`), 60000)
+  await until(async () => evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('已持久化');`), 60000)
   await until(async () => {
     const p = await storage.describe(project.id), d = loadDocument(await storage.load(p), p)
     const found = d.getMap('files').get(d.getMap('meta').get('entryFileId')).get('content').toString().includes('step11 offline reload'); d.destroy(); return found
@@ -383,7 +385,7 @@ try {
   member.password = newPassword; await until(() => revoked.closed); assert.equal(valid.provider.isSynced, true)
   assert.equal(revoked.closeReason, 'COLLAB_USER_REVOKED', 'password change must use the active Outbox event')
   await login(member); revoked = await connect(member, live.id)
-  await api(member, '/api/auth/logout', 'POST', undefined, 204)
+  await api(member, '/api/auth/logout', 'POST', {}, 200)
   await until(() => revoked.closed); assert.equal(valid.provider.isSynced, true)
   assert.equal(revoked.closeReason, 'COLLAB_USER_REVOKED', 'logout must use the active Outbox event')
   edit(valid, '<!-- live after all revocations -->\n')

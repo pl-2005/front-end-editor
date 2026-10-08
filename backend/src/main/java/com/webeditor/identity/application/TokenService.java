@@ -29,6 +29,7 @@ public class TokenService {
             @Value("${editor.auth.audience}") String audience,
             @Value("${editor.auth.access-ttl}") Duration ttl) {
         this.encoder = encoder; this.issuer = issuer; this.audience = audience; this.ttl = ttl;
+        if (ttl.isNegative() || ttl.isZero() || ttl.toSeconds() == 0) throw new IllegalArgumentException("Access token lifetime must be positive seconds");
     }
     /**
      * 签发包含用户 ID、唯一 jti、时间声明和 token_version 的 HS256 访问令牌。

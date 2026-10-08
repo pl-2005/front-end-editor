@@ -39,7 +39,6 @@ function setup() {
   setCredentials({
     user: { id: 4, username: 'owner', displayName: 'Owner', email: null, avatarColor: '#000' },
     accessToken: 'test',
-    refreshToken: 'test',
     expiresIn: 600,
   })
   vi.mocked(teams.getTeam).mockResolvedValue(team)
@@ -164,7 +163,6 @@ describe('team reload ordering', () => {
       setCredentials({
         user: { id: 5, username: 'new', displayName: 'New', email: null, avatarColor: '#000' },
         accessToken: 'new',
-        refreshToken: 'new',
         expiresIn: 600,
       })
     })

@@ -1,3 +1,4 @@
+import { createAuthFetch } from './auth-cookie-client.mjs'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -20,7 +21,7 @@ mkdirSync(root + '/.codex-build', { recursive: true })
 const storageSecret = randomBytes(32).toString('hex'), gatewaySecret = randomBytes(32).toString('hex')
 const initializerSecret = randomBytes(32).toString('hex'), maintenanceSecret = randomBytes(32).toString('hex')
 const base = 'http://127.0.0.1:18090', origin = 'http://localhost:5173'
-const env = { ...process.env, ...config, COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
+const env = { ...process.env, ...config, AUTH_COOKIE_SECURE: 'false', AUTH_LOCAL_DEVELOPMENT: 'true', AUTH_ALLOWED_ORIGINS: origin + ',http://127.0.0.1:15174', COLLAB_CREATION_ENABLED: 'true', COLLAB_TICKET_ENABLED: 'true', COLLAB_GATEWAY_ENABLED: 'true',
   COLLAB_MAINTENANCE_ENABLED: 'false', COLLAB_MAINTENANCE_SECRET: maintenanceSecret,
   COLLAB_GATEWAY_INTERNAL_URL: 'http://127.0.0.1:18097', COLLAB_INITIALIZER_URL: 'http://127.0.0.1:18096/internal/initialize',
   COLLAB_STORAGE_SECRET: storageSecret, COLLAB_GATEWAY_SECRET: gatewaySecret, COLLAB_INITIALIZER_SECRET: initializerSecret }
@@ -51,8 +52,9 @@ async function start(mode) {
     try { return (await fetch(base + '/api/health/readiness')).ok } catch { return false }
   }, 60000)
 }
+const authFetch = createAuthFetch(origin)
 async function api(user, path, method = 'GET', body, expected = 200) {
-  const response = await fetch(base + path, { method, headers: { ...(user ? { Authorization: 'Bearer ' + user.token } : {}),
+  const response = await authFetch(base + path, { method, headers: { ...(user ? { Authorization: 'Bearer ' + user.token } : {}),
     ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(20000) })
   assert.equal(response.status, expected, 'STEP10_API_STATUS')
   const result = response.status === 204 ? undefined : await response.json(); return result?.data
@@ -138,7 +140,7 @@ try {
     target = (await cdp('/new', browserOrigin + '/login')).targetId
     const evaluate = async code => (await cdp(`/eval?target=${target}`, `(async()=>{${code}})()`)).value
     await evaluate(`const {login}=await import('/src/api/auth.ts');await login(${JSON.stringify(name)},${JSON.stringify(password)});history.pushState(null,'',${JSON.stringify(`/teams/${team.id}/projects/${project.id}`)});window.dispatchEvent(new PopStateEvent('popstate'));return true;`)
-    await until(async () => evaluate(`return document.querySelector('.v2-workspace-status')?.textContent.includes('在线')&&!!document.querySelector('.monaco-editor');`), 60000)
+    await until(async () => evaluate(`return ([...document.querySelectorAll('.v2-workspace-status [aria-label]')].map(e=>e.getAttribute('aria-label')).join(' ')).includes('在线')&&!!document.querySelector('.monaco-editor');`), 60000)
     await evaluate(`let fiber=document.querySelector('.v2-workspace')?.[Object.keys(document.querySelector('.v2-workspace')||{}).find(k=>k.startsWith('__reactFiber'))];while(fiber&&!fiber.memoizedProps?.session)fiber=fiber.return;const session=fiber.memoizedProps.session;session.mutate(doc=>{for(const file of doc.getMap('files').values()){if(file.get('path')==='/index.js'){const text=file.get('content');text.delete(0,text.length);text.insert(0,'console.log("Step10 preview isolation works");')}}});return true;`)
     await until(async () => evaluate(`return document.querySelector('.v2-preview-pane')?.textContent.includes('Step10 preview isolation works');`), 60000)
     const frames = await evaluate(`return [...document.querySelectorAll('.v2-preview-boundary iframe')].map(f=>({sandbox:f.getAttribute('sandbox'),referrerPolicy:f.referrerPolicy,src:f.src,parentReadable:(()=>{try{return !!f.contentWindow.document}catch{return false}})()}));`)

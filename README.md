@@ -69,3 +69,5 @@ MySQL、MinIO 和 Redis 的实际地址以根 `.env` 为准。内部路径由浏
 - [发布、回滚与本机运行](docs/V__2/step11-release.md)
 
 V1 快照、版本历史和匿名项目资料仅供历史参考；旧数据保留且隔离，不进入 V2 用户流程。
+
+浏览器登录使用 HttpOnly 刷新 Cookie，页面重载先恢复有效会话；访问令牌仅保留在内存。多标签页需要 Web Locks 和站点存储。认证 Origin/Cookie 配置、开发方案及验收见 [浏览器会话恢复](docs/auth-session/README.md)。
