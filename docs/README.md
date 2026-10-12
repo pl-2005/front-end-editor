@@ -4,23 +4,27 @@
 
 ## 按任务查阅
 
-| 任务 | 文档 |
-| --- | --- |
-| 了解功能并快速启动 | [项目 README](../README.md) |
-| 查看完成状态和实施记录 | [V2 索引](V__2/README.md) |
-| 理解目标、业务范围和约束 | [V2 总方案](V__2/00-overall-plan.md) |
-| 理解模块、存储和安全边界 | [V2 架构](V__2/architecture.md) |
-| 追踪连接、同步、保存、删除和恢复 | [V2 数据流](V__2/data-flow.md) |
-| 对接身份、团队和项目 REST | [V2 API](V__2/api.md) |
-| 开发、配置、构建和验证 | [V2 开发指南](V__2/development.md) |
-| 拆分 V2App、封装页面与复用组件（已实施、验证通过） | [前端重构方案](frontend-refactor/README.md) |
-| 开发刷新后保持登录的 Cookie 会话方案（待开发） | [浏览器登录会话恢复](auth-session/README.md) |
-| 对接 Y.Doc、票据、HMAC 和网关 | [协作模块](../collaboration/README.md) |
-| 指标、停写、联合备份和当前内容恢复 | [运维说明](V__2/step10-operations.md) |
-| 打包、发布、回滚和完整本机运行 | [发布说明](V__2/step11-release.md) |
-| 配置浏览器同源入口 | [nginx 模板](../deploy/nginx-v2.conf) |
-| 配置本机服务与密钥 | [配置模板](../.env.example)和[仓库约束](../AGENTS.md) |
-| 查阅 V1 快照与迁移前行为 | [V1 历史索引](V__1/README.md) |
+| 任务                                                        | 文档                                                  |
+| ----------------------------------------------------------- | ----------------------------------------------------- |
+| 了解功能并快速启动                                          | [项目 README](../README.md)                           |
+| 查看完成状态和实施记录                                      | [V2 索引](V__2/README.md)                             |
+| 理解目标、业务范围和约束                                    | [V2 总方案](V__2/00-overall-plan.md)                  |
+| 查看可视化组件拖拽、源码同步的需求与多 agent 评审（待实施） | [V3 需求与评审](V__3/README.md)                       |
+| 查看 V3 技术风险、并发反例及实施前门禁                     | [V3 技术评审](V__3/technical-review.md)               |
+| 查看组件栏 Bootstrap 模板与项目样式依赖方案               | [Bootstrap 依赖方案](V__3/bootstrap-dependency.md)    |
+| 按步骤实施 V3，查看依赖、退出门禁及子 agent 审查记录      | [V3 开发总计划](V__3/development-plan.md)             |
+| 理解模块、存储和安全边界                                    | [V2 架构](V__2/architecture.md)                       |
+| 追踪连接、同步、保存、删除和恢复                            | [V2 数据流](V__2/data-flow.md)                        |
+| 对接身份、团队和项目 REST                                   | [V2 API](V__2/api.md)                                 |
+| 开发、配置、构建和验证                                      | [V2 开发指南](V__2/development.md)                    |
+| 拆分 V2App、封装页面与复用组件（已实施、验证通过）          | [前端重构方案](frontend-refactor/README.md)           |
+| 开发刷新后保持登录的 Cookie 会话方案（待开发）              | [浏览器登录会话恢复](auth-session/README.md)          |
+| 对接 Y.Doc、票据、HMAC 和网关                               | [协作模块](../collaboration/README.md)                |
+| 指标、停写、联合备份和当前内容恢复                          | [运维说明](V__2/step10-operations.md)                 |
+| 打包、发布、回滚和完整本机运行                              | [发布说明](V__2/step11-release.md)                    |
+| 配置浏览器同源入口                                          | [nginx 模板](../deploy/nginx-v2.conf)                 |
+| 配置本机服务与密钥                                          | [配置模板](../.env.example)和[仓库约束](../AGENTS.md) |
+| 查阅 V1 快照与迁移前行为                                    | [V1 历史索引](V__1/README.md)                         |
 
 ## 文档约定
 
