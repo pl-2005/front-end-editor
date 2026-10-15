@@ -9,10 +9,9 @@
 | 了解功能并快速启动                                          | [项目 README](../README.md)                           |
 | 查看完成状态和实施记录                                      | [V2 索引](V__2/README.md)                             |
 | 理解目标、业务范围和约束                                    | [V2 总方案](V__2/00-overall-plan.md)                  |
-| 查看可视化组件拖拽、源码同步的需求与多 agent 评审（待实施） | [V3 需求与评审](V__3/README.md)                       |
-| 查看 V3 技术风险、并发反例及实施前门禁                     | [V3 技术评审](V__3/technical-review.md)               |
+| 查看 V3 简单实现方案（待实施） | [V3 方案](V__3/README.md)                       |
 | 查看组件栏 Bootstrap 模板与项目样式依赖方案               | [Bootstrap 依赖方案](V__3/bootstrap-dependency.md)    |
-| 按步骤实施 V3，查看依赖、退出门禁及子 agent 审查记录      | [V3 开发总计划](V__3/development-plan.md)             |
+| 按当前代码基线和五步详细任务实施 V3，查看修改位置、测试与交付条件 | [V3 详细开发步骤与总计划](V__3/development-plan.md) |
 | 理解模块、存储和安全边界                                    | [V2 架构](V__2/architecture.md)                       |
 | 追踪连接、同步、保存、删除和恢复                            | [V2 数据流](V__2/data-flow.md)                        |
 | 对接身份、团队和项目 REST                                   | [V2 API](V__2/api.md)                                 |

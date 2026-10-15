@@ -1,68 +1,123 @@
-# V3 开发总计划
+# V3 详细开发步骤与实施总计划
 
-日期：2026-10-12。状态：开发步骤规划；功能未实施，P0 未执行，AC-01～AC-25 未执行。步骤文档的审查状态见[开发步骤审查记录](development-review.md)，不代表应用验收。
+日期：2026-10-14。状态：步骤 1 已实施并验证，见[实施证据](evidence/step01.md)；步骤 2–5 待实施。以下代码基线保留实施前核对记录。
 
-## 基线与使用方式
+本文作为实施入口；功能范围以[需求](requirements.md)为准，实现边界以[技术方案](technical-design.md)为准，交付判断以[验收](acceptance.md)为准。保留现有五步顺序，不恢复旧版十一阶段及跨文件整体撤销方案。
 
-交付范围以[需求规格](requirements.md)、[验收矩阵](acceptance.md)为准；实施顺序遵循[技术评审](technical-review.md)的 P0→P4，并纳入[Bootstrap 方案](bootstrap-dependency.md)。D-01 本机持久恢复及 D-02 冲突提示与人工恢复已确认，保留现有离线编辑。技术评审中的收据检测仍是待证明候选方案，不能以本计划代替证明。
+## 当前代码基线
 
-按表顺序实施；每步先满足入口，再完成实现、失败验证和退出证据，更新实施状态后才能进入下一步。步骤 01 的原型验证使用可晋升的模块契约，后续步骤将其产品化并重跑受影响检查，避免先建完整 UI 才决定核心架构。P0 的全部门禁在步骤 01 关闭；任何未通过项阻止 P1 产品实施，独立研究可以继续。需要更改离线、恢复、性能或渲染范围时，先形成具体影响与方案，修订相关需求/验收并取得对应范围决策；不能仅将失败项标记为后续。
-
-## 开发顺序与依赖
-
-| 步骤 | 阶段与交付 | 前置 | 退出重点 |
-| --- | --- | --- | --- |
-| [01 基线与 P0](steps/01-baseline-and-p0.md) | P0：代码核对、全部关键技术原型与接口冻结 | V3 基线 | 六类 TR 风险及 Bootstrap 门禁都有通过证据或重审后的明确决策 |
-| [02 解析与映射](steps/02-source-parser-and-registry.md) | P1 基础：worker、节点身份、局部可编辑边界 | 01 | UTF-16 定位、容错限制、旧结果丢弃、源码保真 |
-| [03 原子计划与依赖](steps/03-atomic-patch-and-dependencies.md) | P1 基础：PatchPlan、固定 Bootstrap、实例 CSS | 02 | scratch/live 双执行、全部失败零写入、并发引用正确 |
-| [04 共享历史与恢复](steps/04-shared-history-and-recovery.md) | P1 基础：HistoryController、有界持久收据 | 03 | 跨文件历史一致、远端依赖保护、崩溃恢复与冲突检测 |
-| [05 画布与桥接](steps/05-design-canvas-and-bridge.md) | P1 基础：静态投影、资源 resolver、隔离协议 | 04 | 真实浏览器安全、资源、几何、旧通道拒绝 |
-| [06 工作区最小闭环](steps/06-workspace-and-button-loop.md) | P1：按钮拖入、选中定位、取消、多 HTML 壳 | 05 | 一次提交、真实双会话、durable 重开 |
-| [07 模板与属性](steps/07-templates-and-properties.md) | P2：七类模板、文本/属性/样式、多页面 | 06 | 实例隔离、上下文编码、级联说明和完整依赖 |
-| [08 结构编辑](steps/08-structure-commands.md) | P3：排序、跨容器移动、删除、复制 | 07 | 子树/注释保真、非法目标拒绝、并发检测/恢复 |
-| [09 协作与离线](steps/09-collaboration-offline-and-guards.md) | P4：全操作协作、重连、撤权、预算 | 08 | 已初始化离线编辑、晚到更新、epoch 清理、全部入口保护 |
-| [10 完整交付补齐](steps/10-accessibility-performance-and-export.md) | P4：键盘、性能、清理、运行/导出回归 | 09 | Chrome/Edge、1 秒与 200 KiB、ZIP/复制一致 |
-| [11 联合验收与交付](steps/11-local-acceptance-and-delivery.md) | P4：完整矩阵、服务端持久恢复、交付文档 | 10 | FR/NFR/AC 全覆盖、证据完整、状态准确 |
-
-顺序是主实施路径。02～05 虽分别描述正式模块，也须复核步骤 01 对应原型结论；09/10 是完整矩阵补测，不能把冲突恢复、安全、权限或性能基础首次验证延至此时。每个步骤的键盘入口复用同一命令，10 完成可访问性交付验证。
-
-## 共享契约与责任边界
-
-- `SourceRegistry`：projectId/epoch/fileId、解析版本、画布 generation、nodeId、UTF-16 区间、上下文与相对锚点。注册表/选择/几何仅本地派生，不新增 Y.Doc 根或文件字段。
-- `PatchPlan`：预生成标识/时间、期望片段与关系、完整文件/目录/link 变更、无重叠补丁；同步执行器用传入 doc 重取对象，写入前校验全部目标。画布仅提供意图，不能提供任意源码补丁。
-- `HistoryController`：会话级管理本地 MonacoBinding 与 VISUAL_ORIGIN；真实与 scratch 配置一致，scope 至少 files/fileOrder，涉及 directories/meta 时一起覆盖。拒绝整组历史操作不消耗栈。
-- `RecoveryStore`：按 user/project/epoch 隔离的 OfflineLog 侧车；结构操作提交前持久准备，未解决材料不随 durable 清除。容量、崩溃顺序及迟到贡献检测先由 P0 证明。
-- `DesignBridge`：受限静态 iframe、每代 capability 与 MessageChannel、窗口及消息边界；重载/切换/撤权关闭旧通道。运行继续使用 Sandpack。
-- Bootstrap 固定 5.3.8；官方 CSS/许可、HTML 引用、组件与实例样式同一事务。唯一 vendor 路径及 fileId 预生成，内容/hash/许可证明归属，宿主不导入 Bootstrap。
-
-上述名称是建议职责，尚无对应 V3 模块。开发时记录实际落点及接口，不把建议文件名写成已有实现。后端 schema 变更并非前提；若 P0 需要新协议，先完整评审前端、网关、缓存与旧客户端兼容，再重排受影响步骤。
-
-## 需求与验收覆盖
-
-“主步骤”负责完成实现；“联合验证”为退出检查或最终补测，并不表示只在最终步骤才实现。
-
-| 范围 | 主步骤 | 联合验证 |
+| 已核对的代码 | 当前实现 | V3 必须补上的部分 |
 | --- | --- | --- |
-| FR-01/04/10/11 | 02、05、06、07 | AC-04/14/15/23；10、11 |
-| FR-02/03/18 | 03、06、07 | AC-01/02/10/25；09、11 |
-| FR-05/06 | 07 | AC-07/08/09；10、11 |
-| FR-07/08 | 08 | AC-03/05/06/13/17；09、11 |
-| FR-09 | 04、08 | AC-11；09、11 |
-| FR-12 | 05、10 | AC-03/08/15/16/19；11 |
-| FR-13/14/15 | 03、04、09 | AC-10/12/13/14/18/20/21；11 |
-| FR-16 | 09、10 | AC-01/21/22/25；11 |
-| FR-17 | 06～08、10 | AC-24；11 |
-| NFR-01 | 06～08 | AC-03/06/09/17；11 |
-| NFR-02/03 | 02、03、08 | AC-05/14/15；11 |
-| NFR-04 | 01、03、04、09 | AC-10/20/25；11 |
-| NFR-05/06 | 01、02、05、10 | AC-23/25；11 |
-| NFR-07 | 05、06、10 | AC-17/24；11 |
-| NFR-08 | 05、09 | AC-08/18/19；11 |
+| [ProjectWorkspace.tsx](../../frontend/src/editor/v2/ProjectWorkspace.tsx) | 创建用户/项目/epoch 隔离的 session，提供文件树、Monaco、Sandpack、在线成员、同步与持久化状态；选择文件不改变入口 | 设计文件、设计/运行切换、组件/属性/恢复 UI；切换后保留 session 和历史 |
+| [WorkspacePanels.tsx](../../frontend/src/editor/v2/WorkspacePanels.tsx) | Ant Design Splitter、断点布局、文件和源码面板收起 | 容纳设计工具及窄窗口入口，避免布局变化销毁历史 |
+| [MonacoWorkspace.tsx](../../frontend/src/editor/v2/MonacoWorkspace.tsx) | MonacoBinding 直接绑定 Y.Text；UndoManager 在组件内创建/销毁，只跟踪 MonacoBinding；快捷键调用 session.undo | 把历史移到工作区/会话生命周期，添加可视化 origin；定位源码；支持异步历史保护和提交期间输入门禁 |
+| [session.ts](../../frontend/src/collaboration/session.ts) | mutate 在 scratch 上执行并验证，再执行 live；undo 克隆文档和历史栈做预检；按已注册 origin 统计本地更新 | 历史预检配置一致、候选正文可供恢复存储使用；设计记录初始化、远端检查及统一写入口 |
+| [document.ts](../../frontend/src/collaboration/document.ts) | files/fileOrder/meta/directories 协议、文件路径与容量校验；create 在 action 内 randomUUID | Bootstrap 创建支持预生成固定 ID，保持 scratch/live 一致；不改变协议 |
+| [offline.ts](../../frontend/src/collaboration/offline.ts) | 有界 IndexedDB 更新日志及 custom 存储；durable 时压缩待确认日志；按用户/项目/epoch 清理 | 独立设计恢复材料、先落盘后写入、总预算协调、prepared 重开及撤权清理 |
+| [SandpackBridge.tsx](../../frontend/src/editor/v2/SandpackBridge.tsx)、[projection.ts](../../frontend/src/editor/v2/projection.ts) | 投影项目源码到 Sandpack，补充仅用于运行的工具依赖 | 原运行流程继续复用；另建安全静态设计投影，不能依赖 Sandpack DOM |
+| [projectArchive.ts](../../frontend/src/collaboration/projectArchive.ts)、[exportTeamProject.ts](../../frontend/src/collaboration/exportTeamProject.ts) | 从项目文件生成 ZIP；已有被删文件恢复内容可进入专用恢复目录 | 验证真实 Bootstrap 资源保留；设计侧车及工具通信不进入普通项目文件和 ZIP |
+| [frontend/package.json](../../frontend/package.json) | test/lint/build 已有入口；尚未声明 Bootstrap、parse5 和设计清洗/CSS 解析依赖 | 在步骤 1/2 确定必要包及固定版本，更新 lockfile；当前没有 V3 设计模块 |
 
-25 项 AC 的最终责任均在 11；逐项执行场景仍以原验收矩阵为准，不能用上述分组缩减断言。
+当前恢复提示主要针对远端删除的文件，不等同于 V3 的基线、本地意图、破坏性操作前材料和整文件并发检查。已有 undo 预检也不能直接视为满足 V3 历史保护。
 
-## 环境、证据和状态
+## 固定约束和预算
 
-应用运行/验证必须读取仓库根 `.env`，连接其中本机 MySQL、MinIO、Redis，禁止 Docker / Docker Compose，禁止打印/提交凭据。纯内存算法验证无需服务，必须明确其不能证明网关或持久化。已有本机启动器与验收脚本不可同时占用相同端口。沿用当前 Cookie 会话恢复行为，以实际代码和[认证会话文档](../auth-session/README.md)为准，不恢复旧 V2 设计稿中的已过时认证方案。
+- Y.Text 是唯一源码权威；新增解析、nodeId、选择、能力令牌和恢复状态只存本地，不加入 Y.Doc schema。
+- 不新增后端表、REST API、网关协议或页面 JSON。后台继续自动持久化现有文档；离线能力沿用现有 session。
+- 只支持单个已有 HTML 的正文补丁。Bootstrap 准备可同时增加 CSS/许可/目录和 HTML link，但独立提交、不进入正文历史。
+- 协议预算来自 [document-rules.ts](../../collaboration/src/document-rules.ts)：100 文件（含现有校验计入的逻辑删除项）、100 显式目录、1 MiB/文件、10 MiB 正文、12 MiB Y.Doc、2 MiB Update。不能只数可见文件或字符串长度。
+- 现有离线待确认预算为 1536 KiB，`CACHE_LIMIT = 12 MiB + 1536 KiB`。设计材料暂定最多 5 MiB，同时计入共享本机缓存预算；不能把 5 MiB 当作额外豁免。具体计量/原子预留在步骤 2 落实，预算不足拒绝设计写入，不自动清未解决记录。
+- 设计 HTML 上限 200 KiB，以 UTF-8 字节计量；位置/补丁偏移使用 UTF-16。CSS 投影总量、重复引用、通信大小/超时另设明确可测试的常量，记录实测后选定值，不修改协议预算。
+- 应用运行和验收使用根 `.env` 以及本机 MySQL、MinIO、Redis；不使用 Docker / Docker Compose，不输出或提交凭据。
 
-每步记录基点、修改范围、真实命令、测试设备/版本、源文件断言、失败场景、证据路径及未通过项。新增 V3 脚本必须实际存在后再登记命令。本计划不运行应用、不新增依赖或迁移、不宣称技术门禁或功能验收通过，不包含公网部署。
+## 实施顺序
+
+| 步骤 | 实现内容 | 完成条件 |
+| --- | --- | --- |
+| 1 源码与安全画布 | 工作区切换；位置解析、临时节点映射、只读限制；独立静态 iframe；项目直接 CSS；选择定位；过期命令拒绝。 | 普通页面正确显示，源码变化使旧命令失效，用户脚本/导航不执行，原文不被投影改写；基础真实浏览器检查通过。 |
+| 2 按钮闭环与保护 | Bootstrap 独立准备；单 HTML 补丁；按钮插入/删除；共享正文历史；本机恢复落盘和文件级远端检查。 | 一次插入可撤销，资源不被撤销；取消/超限/准备失败零写入；两个会话与离线迟到更新触发检查；刷新能看到材料。 |
+| 3 七类模板与属性 | 补全七模板，文本/属性编码、基础内联样式、简单 Flex；普通容器投放和前后插入，父元素选择；按钮/键盘入口。 | 每个模板正常插入；样式只改实例；混合文本/特殊结构明确限制；不误删相邻内容。 |
+| 4 集成与边界 | 多 HTML、资源复用、重命名/删除提示、可写与预算统一门禁、重连/撤权/epoch、iframe 生命周期、性能与窄窗口。 | 所有写入口使用同一校验；恢复超限/失败停止设计写入；旧桥接不可写；代码、运行、已有文件操作不回归。 |
+| 5 本机验收与交付 | 执行十项验收，真实双会话、MySQL/MinIO 持久化重开、导出/复制、Chrome/Edge；补充实际运行说明。 | 全部检查有真实结果，失败项修复；功能状态与文档一致，无凭据或工具信息进入 ZIP。 |
+
+每步详细任务如下，按序执行；步骤 1 已完成，其余步骤待实施：
+
+| 顺序 | 详细步骤 | 前置产物 | 本步交付 |
+| --- | --- | --- | --- |
+| 1 | [源码映射、安全画布与选择](steps/01-source-and-safe-canvas.md) | 当前 V2 工作区与现有检查基线 | 可切换、可选择、可定位的只读设计画布 |
+| 2 | [Bootstrap、按钮写入、共享历史与恢复](steps/02-button-history-and-recovery.md) | 步骤 1 的解析代次、目标映射和安全桥接 | 有落盘保护、可撤销、可离线及并发提示的按钮闭环 |
+| 3 | [七类模板、属性与插入交互](steps/03-templates-properties-and-insertion.md) | 步骤 2 的统一写命令、历史和门禁 | 首版完整的组件、属性、删除与拖拽交互 |
+| 4 | [多文件集成、边界与回归](steps/04-integration-and-boundaries.md) | 步骤 3 的功能闭环 | 所有入口、资源、生命周期、预算和布局检查通过 |
+| 5 | [本机验收、证据与交付](steps/05-local-acceptance-and-delivery.md) | 步骤 4 的可交付构建 | A1–A10 真实结果及可复现启动/交付记录 |
+
+步骤 2 将历史、恢复和并发验证放进第一个按钮闭环，不能等 UI 全部完成才发现方案不可行。每步只完成当前具体用例，需要新抽象时再增加。
+
+步骤 1 不开放正文写入。步骤 2 完成前不扩展七类模板或拖拽 UI；尤其先证明共享历史不捕获 Bootstrap、远端检查不消耗历史栈、刷新可找回被删除内容，再进入步骤 3。步骤 4 是全入口收口，不是首次实现离线/恢复/安全；这些保护必须随第一个写用例交付。
+
+## 建议代码组织
+
+以下为建议新增位置，尚未存在；允许合并小文件，不要求逐项建立抽象。
+
+```text
+frontend/src/editor/visual/
+  VisualWorkspace.tsx             # 组合组件栏、画布、属性和状态
+  ComponentPalette.tsx
+  PropertiesPanel.tsx
+  RecoveryPanel.tsx
+  source/                        # 位置解析、注册表、编码、局部补丁
+  canvas/                        # 清洗投影、CSS 资源、桥接、选择和拖拽
+  templates/                     # 七类模板、Bootstrap 内置资源和准备计划
+frontend/src/collaboration/
+  visualRecovery.ts              # 有界本机材料；集成已有清理规则
+  editorHistory.ts               # 或等价工作区级历史实现
+```
+
+不要求重构文件树全部命令，不引入通用 PatchPlan 平台。仅在具体用例需要处添加小接口：固定 ID 创建、历史候选预检、统一设计命令及恢复预算协调。第三方包具体版本与导入方式在实施时核验官方说明；本轮不安装依赖。
+
+## 每步实施与提交约定
+
+1. 阅读该步的前置条件与对应需求，确认上一步完成条件已满足。
+2. 先落实纯源码/预检/保护逻辑，再接 UI；涉及安全、历史、恢复的失败路径必须与成功路径一起实现。
+3. 运行相关现有及新增测试；浏览器事实使用真实浏览器核验，不用 jsdom 代替 sandbox、Pointer Events 或服务持久化。
+4. 逐项核对源码 diff、Y.Doc 和恢复存储，记录结果；失败即修复或写明阻塞，不把未验证功能标为完成。
+5. 建议每步一个可独立审阅的提交；步骤 2 可按固定 ID/历史、资源准备、恢复/按钮三个连续提交拆分，但整个闭环通过后才能进入步骤 3。
+
+当前工作区的 V3 文档已有未提交改动及旧步骤删除；本计划以当前磁盘内容为准。实施时保留这些改动，不恢复旧文件或覆盖用户工作。
+
+## 开发约束
+
+- 不改 Y.Doc schema，不新建页面 JSON，不重写网关，不新增后端表或 API。若发现核心需求无法复用现有会话，记录具体原因再调整方案。
+- 正文操作只改一个已有 HTML；Bootstrap 准备是唯一新增多文件动作，计划预生成 ID，scratch/live 一致。不要把现有所有文件命令改造成通用 PatchPlan。
+- 历史统一作用域/origin；不捕获 Bootstrap 安装 origin，不做资源删除补偿。模式切换、收起源码区都不销毁正文历史。
+- 并发采用整文件保守检查；不承诺精确节点合并，不做移动，不全量回滚。已确认的离线与本机持久恢复必须完成。
+- 每步补必要的源码结果/失败路径测试；不要只写重复实现逻辑的测试，也不要把截图当作源码/持久化证据。
+
+## 检查与记录
+
+前端已有命令：在 `frontend` 运行 `npm test`、`npm run lint`、`npm run build`，按实际改动先运行相关测试，交付前完成这三项。新增浏览器脚本存在后再记录准确命令，不能编造已执行结果。
+
+当前已存在、可用于增量回归的测试入口如下，命令工作目录均为 `frontend`；新增 visual 测试在实际建立文件后加入对应组：
+
+| 检查重点 | 现有增量命令 |
+| --- | --- |
+| 工作区/面板/运行桥接 | `npm test -- src/editor/v2/WorkspacePanels.test.tsx src/editor/v2/SandpackBridge.test.tsx src/editor/v2/WorkspaceFileExplorer.test.tsx` |
+| 文档/历史/离线会话 | `npm test -- src/collaboration/document.test.ts src/collaboration/session.test.ts src/collaboration/session.offline.test.ts src/collaboration/offline.test.ts` |
+| 导出与项目入口 | `npm test -- src/collaboration/projectArchive.test.ts src/collaboration/exportTeamProject.test.ts src/features/projects/pages/ProjectPage.test.tsx` |
+
+这些测试只证明已有覆盖的行为，不能单独证明 V3 功能或真实服务通过。步骤 1 最终全量测试已包含这些测试文件；实际命令和浏览器验证见[实施证据](evidence/step01.md)。
+
+应用验证读取根 `.env`，连接本机 MySQL、MinIO、Redis，不用 Docker，不输出凭据。沿用[V2 本地运行指南](../V__2/development.md)和[交付启动说明](../V__2/step11-release.md)，避免同时启动占用相同端口的程序。
+
+实施记录至少包含下列字段；建议在实施后新增 `implementation-log.md` 并在本索引挂链接，当前不预填通过结果：
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 步骤/日期/代码状态 | 五步编号、执行时间、commit 或未提交状态 |
+| 修改文件与行为 | 实际文件、用户可观察变化、对应 R/A 编号 |
+| 命令与工作目录 | 实际执行命令，不记录凭据或带秘密的环境值 |
+| 自动检查结果 | 退出码、测试结果；未跑/失败/通过分别记录 |
+| 浏览器与服务结果 | 浏览器版本、设备、双会话/离线/重开/本机服务证据 |
+| 证据位置 | 受限本机目录或脱敏报告；截图配套源码断言 |
+| 剩余问题 | 影响、复现步骤、修复后复测结果 |
+
+步骤 1 已完成构建、自动测试及 Chrome 基础验证，见[实施证据](evidence/step01.md)；这不代表完整 V3 开发完成。既有 V2 通过记录只作为历史基线。
