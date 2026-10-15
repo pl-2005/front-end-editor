@@ -1,13 +1,15 @@
 import { CodeOutlined, DownOutlined, DownloadOutlined, FileOutlined } from '@ant-design/icons'
 import { Button, Popover, Tooltip } from 'antd'
 import { CloudServerOutlined, SaveOutlined, WifiOutlined } from '@ant-design/icons'
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import * as Y from 'yjs'
 import type { TeamProjectDetails } from '../../types/collaboration'
 import { fileCommands, readDocument } from '../../collaboration/document'
 import { CollaborationSession, isDurable, type ConnectionState } from '../../collaboration/session'
 import { MonacoWorkspace } from './MonacoWorkspace'
+import { DesignCanvas, type SourceLocation } from '../visual/canvas/DesignCanvas'
+import '../visual/canvas/design.css'
 import { SandpackBridge } from './SandpackBridge'
 import { WorkspaceFileExplorer } from './WorkspaceFileExplorer'
 import { WorkspacePanels } from './WorkspacePanels'
@@ -37,8 +39,15 @@ function ConnectedWorkspace({
   const [chosenId, setChosenId] = useState(''),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('')
-  const [showFiles, setShowFiles] = useState(true)
   const [showCode, setShowCode] = useState(true)
+  const [mode, setMode] = useState<'run' | 'design'>('run')
+  const [sourceLocation, setSourceLocation] = useState<SourceLocation>()
+  const locateSource = useCallback((location: SourceLocation) => {
+    setChosenId(location.fileId)
+    setShowCode(true)
+    setSourceLocation(location)
+  }, [])
+  const [showFiles, setShowFiles] = useState(true)
   const [showMembers, setShowMembers] = useState(false)
   const members = [...(state.members ?? [])].sort((a, b) => {
     const priority = (member: typeof a) =>
@@ -296,6 +305,14 @@ function ConnectedWorkspace({
                 />
               </Tooltip>
             </div>
+            <div role="group" aria-label="预览模式">
+              <Button aria-pressed={mode === 'design'} onClick={() => setMode('design')}>
+                设计
+              </Button>
+              <Button aria-pressed={mode === 'run'} onClick={() => setMode('run')}>
+                运行
+              </Button>
+            </div>
             {status}
             <Popover
               trigger="click"
@@ -373,15 +390,24 @@ function ConnectedWorkspace({
                   files={document.files}
                   activeId={activeId}
                   writable={state.writable}
+                  sourceLocation={sourceLocation}
                 />
               </div>
             }
             preview={
-              <SandpackBridge
-                session={session}
-                entry={entry}
-                structureKey={JSON.stringify(document.files.map((f) => f.path).sort())}
-              />
+              mode === 'design' ? (
+                <DesignCanvas
+                  file={document.files.find((f) => f.id === activeId)}
+                  files={document.files}
+                  onLocate={locateSource}
+                />
+              ) : (
+                <SandpackBridge
+                  session={session}
+                  entry={entry}
+                  structureKey={JSON.stringify(document.files.map((f) => f.path).sort())}
+                />
+              )
             }
           />
         </>

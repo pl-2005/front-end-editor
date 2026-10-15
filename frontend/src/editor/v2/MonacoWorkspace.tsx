@@ -6,12 +6,14 @@ import type { CollaborationSession } from '../../collaboration/session'
 import { languageFor, languageSession, modelUri, monaco } from './languages'
 import { presenceColors } from '../../collaboration/presenceColors'
 import { useFeedback } from '../../ui/useNotice'
+import type { SourceLocation } from '../visual/canvas/DesignCanvas'
 
 interface Props {
   session: CollaborationSession
   files: FileRecord[]
   activeId: string
   writable: boolean
+  sourceLocation?: SourceLocation
 }
 interface BoundModel {
   model: monaco.editor.ITextModel
@@ -24,7 +26,7 @@ interface BoundModel {
   view?: monaco.editor.ICodeEditorViewState | null
 }
 /** Imperative models avoid React renders for every keystroke; only Y.Text is authoritative. */
-export function MonacoWorkspace({ session, files, activeId, writable }: Props) {
+export function MonacoWorkspace({ session, files, activeId, writable, sourceLocation }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const runtime = useRef<{
     editor: monaco.editor.IStandaloneCodeEditor
@@ -35,6 +37,7 @@ export function MonacoWorkspace({ session, files, activeId, writable }: Props) {
     renderPresence?: () => void
   } | null>(null)
   const [warning, setWarning] = useState('')
+  const lastLocation = useRef('')
   useEffect(() => {
     const languages = languageSession()
     const editor = monaco.editor.create(host.current!, {
@@ -376,6 +379,34 @@ export function MonacoWorkspace({ session, files, activeId, writable }: Props) {
     editor.updateOptions({ readOnly: !writable })
     current.renderPresence?.()
   }, [session, files, activeId, writable])
+  useEffect(() => {
+    const current = runtime.current
+    if (
+      !current ||
+      !sourceLocation ||
+      sourceLocation.fileId !== activeId ||
+      lastLocation.current === sourceLocation.requestId
+    )
+      return
+    lastLocation.current = sourceLocation.requestId
+    const bound = current.models.get(activeId)
+    const { source, range } = sourceLocation
+    if (
+      !bound ||
+      bound.text.toString() !== source ||
+      bound.model.getValue() !== source ||
+      range.start < 0 ||
+      range.end > source.length ||
+      range.start > range.end
+    )
+      return
+    const start = bound.model.getPositionAt(range.start)
+    const end = bound.model.getPositionAt(range.end)
+    const selection = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column)
+    current.editor.setSelection(selection)
+    current.editor.revealRangeInCenter(selection)
+    current.editor.focus()
+  }, [sourceLocation, activeId, files])
   const active = files.find((f) => f.id === activeId)
   const budgetExceeded =
     active && languageFor(active.language, active.content.toString()).startsWith('budget-')
