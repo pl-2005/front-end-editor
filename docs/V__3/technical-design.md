@@ -35,7 +35,11 @@
 
 工具脚本只报告选择、矩形和投放意图，父层生成补丁。每代握手验证 iframe 窗口和一次性随机 capability，再使用 MessageChannel；opaque origin 的 `null` 不是身份。消息做类型、大小、代次及 nodeId 校验，不提供凭据或任意文件写能力。切换项目/文件/模式、撤权和重载关闭旧通道。
 
-组件拖拽由父层 Pointer Events capture 管理，向子页请求 elementFromPoint 命中；只支持普通流容器及前/后插入。统一 iframe 内外 CSS 像素坐标。Esc、pointercancel、失焦、重载、失权和超时都取消。按钮插入使用同一命令，不另造一套流程。
+2026-10-16 补充（待实施）：设计画布采用“悬停检查、点击锁定”。iframe 工具脚本将 pointermove 按 requestAnimationFrame 合并，报告当前本代节点及矩形；同节点且几何未变时不重复发送。协议区分 hover、清除 hover 与锁定 selection，沿用现有安全校验。父层分别保存临时检查和锁定目标，展示检查框、标签名/尺寸及独立选中框；覆盖层不拦截指针，悬停不改变属性/结构操作目标。
+
+源码区展开时，悬停通过 Monaco decoration 高亮映射范围，仅在目标变化且范围不可见时滚动，不调用 focus/setSelection，不改变插入点、历史或协作光标。源码区收起时不因悬停展开；点击锁定沿用源码选中定位和“打开源码并定位”入口。指针移出、Esc 或失焦清除临时悬停，保留锁定选择；源码变化、代次/文件/模式切换、重载及撤权清空两类状态和装饰，并取消排队动画帧。滚动、缩放及布局变化刷新几何；无 hover 设备保留点击和按钮入口。该检查只作用于静态设计 iframe，运行模式保持原行为。
+
+组件拖拽由父层 Pointer Events capture 管理，向子页请求 elementFromPoint 命中；只支持普通流容器及前/后插入。拖拽期间暂停普通悬停检查，由投放命中接管，结束后恢复。统一 iframe 内外 CSS 像素坐标。Esc、pointercancel、失焦、重载、失权和超时都取消。按钮插入使用同一命令，不另造一套流程。
 
 ## 历史和 Bootstrap
 
