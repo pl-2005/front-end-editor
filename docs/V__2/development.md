@@ -43,6 +43,8 @@
 
 固定协议限制为 100 文件、1 MiB/文件、10 MiB 总正文、12 MiB Y.Doc、2 MiB Update；离线待确认日志 1.5 MiB，200 KiB 以上文件降低语言服务。网关可配置参数须为正安全整数。
 
+团队项目可从文件树工具栏或文件夹菜单多选上传 UTF-8 文本，支持 HTML/CSS/JS/JSON/TXT/Markdown；冲突不覆盖、整批失败不写入。无需新增环境变量、数据库迁移或 MinIO 上传配置，沿用上述协作容量和本机持久化链路。使用方式、自动检查及手工验收见[文件管理交互](file-explorer.md)。
+
 ## 分进程开发
 
 受控开发时在根 `.env` 设置 creation/ticket/gateway=true、maintenance=false，配置独立密钥及精确页面 Origin。生产默认关闭策略见发布说明。V2 编辑器需要 Spring、初始化服务与网关，仅启动 Vite/API 不足以编辑。

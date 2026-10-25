@@ -80,6 +80,8 @@ function ConnectedWorkspace({
         session.mutate((d) => fileCommands(d, session.identity, () => true).create(path)),
       createDirectory: (path: string) =>
         session.mutate((d) => fileCommands(d, session.identity, () => true).createDirectory(path)),
+      upload: (files: { path: string; code: string }[]) =>
+        session.mutate((d) => fileCommands(d, session.identity, () => true).importFiles(files)),
       rename: (from: string, path: string) =>
         session.mutate((d) => fileCommands(d, session.identity, () => true).renamePath(from, path)),
       remove: (path: string) =>
@@ -350,6 +352,10 @@ function ConnectedWorkspace({
                   entryFileId={document.entryFileId}
                   writable={state.writable}
                   onOpen={setChosenId}
+                  onUpload={(files) => {
+                    const ids = commands.upload(files)
+                    if (ids[0]) setChosenId(ids[0])
+                  }}
                   onCreate={(path, kind) => {
                     if (kind === 'directory') commands.createDirectory(path)
                     else setChosenId(commands.create(path))

@@ -154,6 +154,47 @@ export function fileCommands(doc: Y.Doc, identity: Identity, writable: () => boo
     state.directories.some((directory) => isWithin(directory, path)) ||
     state.files.some((file) => file.path.startsWith(`${path}/`))
   return {
+    /** 全量预检后一次写入，任何文件失败都不会留下半批上传结果。 */
+    importFiles(inputs: { path: string; code: string }[]): string[] {
+      check()
+      const records = doc.getMap<Y.Map<unknown>>('files')
+      if (records.size + inputs.length > LIMITS.files)
+        throw new Error('文件数量已达上限（包含逻辑删除文件）')
+      let total = [...records.values()].reduce(
+        (size, file) => size + byteLength((file.get('content') as Y.Text).toString()),
+        0,
+      )
+      const prepared = inputs.map(({ path: value, code }) => {
+        const path = normalizePath(value)
+        available(path)
+        const size = byteLength(code)
+        total += size
+        if (size > LIMITS.fileBytes) throw new Error(`${path} 超过单文件 1 MiB 限制`)
+        if (total > LIMITS.totalBytes) throw new Error('项目文件总内容超过 10 MiB 限制')
+        return { id: crypto.randomUUID(), path, code }
+      })
+      prepared.forEach((file, index) => {
+        if (
+          prepared
+            .slice(0, index)
+            .some((other) => isWithin(file.path, other.path) || isWithin(other.path, file.path))
+        )
+          throw new Error(`上传文件路径重复：${file.path}`)
+      })
+      doc.transact(() => {
+        prepared.forEach(({ id, path, code }) => {
+          const file = new Y.Map<unknown>()
+          file.set('id', id)
+          file.set('path', path)
+          file.set('language', validatePath(path))
+          file.set('deletedAt', null)
+          file.set('content', new Y.Text(code))
+          records.set(id, file)
+        })
+        doc.getArray<string>('fileOrder').push(prepared.map((file) => file.id))
+      }, STRUCTURE_ORIGIN)
+      return prepared.map((file) => file.id)
+    },
     createDirectory(value: string) {
       const path = normalizeDirectoryPath(value),
         state = check()

@@ -45,6 +45,12 @@ sequenceDiagram
 
 Y.Doc 单向派生文件树、Monaco 和 Sandpack；预览文件 300 ms 防抖、最长 1 秒更新，结构/入口改变重建运行环境。预览补丁不写回文档。Awareness 显示服务端绑定的在线身份与相对光标，不保存源码或历史。
 
+## 本地文件上传
+
+文件树工具栏或文件夹菜单选择文件时固定目标目录，浏览器预检扩展名、文件数量及字节数，再并行读取和严格解码 UTF-8 文本。读取完成后复核可编辑状态，`CollaborationSession.mutate` 先在临时 Y.Doc 中执行整批 `importFiles`，检查当前路径冲突、包含逻辑删除文件的容量及 Update／离线日志预算。预检通过后，一次 transaction 写入全部文件的稳定 fileId、路径、语言和 Y.Text，并打开第一个文件；失败不向实时文档写入部分文件。
+
+文件随后进入既有 Yjs Update、离线日志、网关校验、广播与自动持久化流程。浏览器不直传 MinIO，不新增 REST 上传接口。「已上传」仅确认本地导入，服务端完成仍以「已持久化」为准；并发同名路径沿用既有归一化规则。操作和限制见[文件管理交互](file-explorer.md)。
+
 ## 自动持久化
 
 网关每房只有一个保存任务，1 秒防抖、最长 5 秒触发；离房、复制和正常停机也 flush。保存先通过 Spring 上传不可变 Y.Doc 对象，再按预期 epoch/generation CAS 切换 MySQL 指针并递增 generation。回执丢失使用相同业务幂等键对账；同 epoch CAS 冲突重载权威状态、按序重放 pending 并校验重试。MinIO I/O 不包在数据库事务中。
