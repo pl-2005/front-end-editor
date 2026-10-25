@@ -10,6 +10,68 @@ import {
 
 import { fixture } from '../test/collaborationFixture'
 describe('collaborative file commands', () => {
+  it('imports a batch in one update and synchronizes exact content to another peer', () => {
+    const f = fixture(),
+      peer = new Y.Doc()
+    try {
+      let updates = 0
+      f.doc.on('update', () => {
+        updates++
+      })
+      const ids = f.commands.importFiles([
+        { path: '/src/a.js', code: 'const text = "你好"' },
+        { path: '/empty.html', code: '' },
+      ])
+      expect(updates).toBe(1)
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(f.doc))
+      expect(
+        readDocument(peer, f.identity)
+          .files.filter((file) => ids.includes(file.id))
+          .map((file) => file.content.toString()),
+      ).toEqual(['const text = "你好"', ''])
+      validateDocument(peer, f.identity)
+      expect(fingerprint(f.doc)).toBe(serverFingerprint(peer))
+    } finally {
+      f.doc.destroy()
+      peer.destroy()
+    }
+  })
+
+  it('rejects conflicting paths, oversized content and read-only imports without partial changes', () => {
+    const f = fixture()
+    try {
+      const before = fingerprint(f.doc)
+      for (const inputs of [
+        [
+          { path: '/new.js', code: 'ok' },
+          { path: '/index.html', code: 'replacement' },
+        ],
+        [
+          { path: '/same.js', code: '' },
+          { path: '/same.js', code: '' },
+        ],
+        [
+          { path: '/a.js', code: '' },
+          { path: '/a.js/child.js', code: '' },
+        ],
+        [{ path: '/big.txt', code: '你'.repeat(400000) }],
+        Array.from({ length: 100 }, (_, i) => ({ path: `/${i}.txt`, code: '' })),
+        Array.from({ length: 11 }, (_, i) => ({
+          path: `/${i}.txt`,
+          code: 'a'.repeat(1024 * 1024),
+        })),
+      ]) {
+        expect(() => f.commands.importFiles(inputs)).toThrow()
+        expect(fingerprint(f.doc)).toBe(before)
+      }
+      expect(() =>
+        fileCommands(f.doc, f.identity, () => false).importFiles([{ path: '/no.js', code: '' }]),
+      ).toThrow('不可编辑')
+      expect(fingerprint(f.doc)).toBe(before)
+    } finally {
+      f.doc.destroy()
+    }
+  })
   it('retains the parent after removing or moving its final child folder', () => {
     const f = fixture()
     try {

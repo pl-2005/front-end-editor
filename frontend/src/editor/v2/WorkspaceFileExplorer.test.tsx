@@ -13,6 +13,11 @@ function setup(writable = true) {
   f.commands.createDirectory('/empty')
   let activeId = 'entry'
   const callbacks = {
+    onUpload: vi.fn((files: { path: string; code: string }[]) => {
+      const ids = f.commands.importFiles(files)
+      activeId = ids[0]
+      refresh()
+    }),
     onOpen: vi.fn((id: string) => {
       activeId = id
       refresh()
@@ -67,6 +72,42 @@ describe('WorkspaceFileExplorer', () => {
   afterEach(() => {
     documents.splice(0).forEach((f) => f.doc.destroy())
     vi.restoreAllMocks()
+  })
+
+  it('uploads multiple files into the selected folder and preserves text without templates', async () => {
+    const { f, callbacks } = setup()
+    fireEvent.click(screen.getByText('empty'))
+    fireEvent.click(screen.getByRole('button', { name: '上传文件' }))
+    fireEvent.change(screen.getByLabelText('选择上传文件'), {
+      target: { files: [new File(['你好'], 'notes.md'), new File([''], 'blank.html')] },
+    })
+    await waitFor(() =>
+      expect(callbacks.onUpload).toHaveBeenCalledWith([
+        { path: '/empty/notes.md', code: '你好' },
+        { path: '/empty/blank.html', code: '' },
+      ]),
+    )
+    expect(screen.getByText('已上传 2 个文件')).toBeTruthy()
+    expect(
+      readDocument(f.doc, f.identity)
+        .files.find((file) => file.path === '/empty/blank.html')
+        ?.content.toString(),
+    ).toBe('')
+  })
+
+  it('reports upload conflicts without importing any files and permits retry', async () => {
+    const { f } = setup()
+    fireEvent.click(screen.getByTitle('选择项目根目录'))
+    fireEvent.click(screen.getByRole('button', { name: '上传文件' }))
+    const input = screen.getByLabelText('选择上传文件')
+    fireEvent.change(input, {
+      target: { files: [new File(['new'], 'new.js'), new File(['replace'], 'index.html')] },
+    })
+    await screen.findByText('该文件路径已存在')
+    expect(readDocument(f.doc, f.identity).files).toHaveLength(2)
+    fireEvent.change(input, { target: { files: [new File(['ok'], 'new.js')] } })
+    await screen.findByText('已上传 1 个文件')
+    expect(readDocument(f.doc, f.identity).files).toHaveLength(3)
   })
 
   it('creates files and empty folders in the selected directory with inline validation and cancellation', async () => {
@@ -164,6 +205,13 @@ describe('WorkspaceFileExplorer', () => {
 
   it('disables entry deletion and all mutations while read-only', async () => {
     const { callbacks } = setup(false)
+    expect((screen.getByRole('button', { name: '上传文件' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    fireEvent.change(screen.getByLabelText('选择上传文件'), {
+      target: { files: [new File(['x'], 'x.js')] },
+    })
+    expect(callbacks.onUpload).not.toHaveBeenCalled()
     expect((screen.getByRole('button', { name: '新建文件' }) as HTMLButtonElement).disabled).toBe(
       true,
     )

@@ -83,6 +83,8 @@
 
 详情 collaboration 包含 collaborationMode=`YJS`、epoch、generation、contentHash、size、contentType；不含 files、objectKey 或旧 version。初始化失败返回 COLLAB_INITIALIZATION_FAILED，响应头 X-Initializing-Project 提供可重试 ID。
 
+项目文件上传由浏览器读取 UTF-8 文本，通过现有 Yjs WebSocket 协作命令加入文档；没有 multipart REST 上传接口或浏览器直传 MinIO 的 URL。路径冲突、编码及容量错误由文件栏显示，持久化状态沿用协作消息。支持类型与交互见[文件管理交互](file-explorer.md)。
+
 `POST /api/projects/{id}/collab-ticket` 是旧项目路径下唯一开放的业务路由：Bearer 签发约 60 秒有效的单次票据，data 包含 ticket/expiresAt/projectId/epoch。浏览器通过精确 `/collaboration` 的认证消息发送票据，房间名为 `project:{id}:epoch:{epoch}`；重新连接申请新票据，不放 URL、日志或持久存储。
 
 ## 健康与错误

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Dropdown, Input, Modal, Select, Tree } from 'antd'
 import type { MenuProps, TreeDataNode } from 'antd'
 import {
@@ -9,12 +9,14 @@ import {
   FolderOpenOutlined,
   FolderOutlined,
   MoreOutlined,
+  UploadOutlined,
   VerticalAlignMiddleOutlined,
 } from '@ant-design/icons'
 import type { FileRecord } from '../../collaboration/document'
 import { normalizePath } from '../../collaboration/document'
 import { isWithin, normalizeDirectoryPath } from '../../../../collaboration/src/directories'
 import { useDialogs } from '../../ui/useDialogs'
+import { readUploadFiles, UPLOAD_ACCEPT } from '../../collaboration/uploadFiles'
 
 type ProjectFile = Pick<FileRecord, 'id' | 'path' | 'language'>
 interface FileNode extends TreeDataNode {
@@ -34,6 +36,7 @@ interface Props {
   onRename: (from: string, to: string) => void
   onDelete: (path: string) => () => void
   onSetEntry: (id: string) => void
+  onUpload: (files: { path: string; code: string }[]) => void
 }
 interface Edit {
   key: string
@@ -129,10 +132,23 @@ export function WorkspaceFileExplorer({
   onRename,
   onDelete,
   onSetEntry,
+  onUpload,
 }: Props) {
   const dialogs = useDialogs()
   const [edit, setEdit] = useState<Edit | null>(null)
   const [error, setError] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const [uploadNotice, setUploadNotice] = useState('')
+  const uploadInput = useRef<HTMLInputElement>(null)
+  const uploadDirectory = useRef('/')
+  const uploadPending = useRef(false)
+  const canUpload = useRef(writable)
+  useLayoutEffect(() => {
+    canUpload.current = writable
+    return () => {
+      canUpload.current = false
+    }
+  }, [writable])
   const [moving, setMoving] = useState<FileNode | null>(null)
   const [destination, setDestination] = useState('/')
   const [undo, setUndo] = useState<{ path: string; restore: () => void } | null>(null)
@@ -186,6 +202,31 @@ export function WorkspaceFileExplorer({
     setError('')
     reveal(parent)
     setEdit({ key: 'draft', parent, kind, value: '' })
+  }
+  const beginUpload = (parent = context) => {
+    if (!writable || uploadPending.current) return
+    uploadDirectory.current = parent
+    uploadInput.current?.click()
+  }
+  const upload = async (files: File[]) => {
+    if (!files.length || !writable || uploadPending.current) return
+    uploadPending.current = true
+    setUploading(true)
+    setError('')
+    setUploadNotice('')
+    const parent = uploadDirectory.current
+    try {
+      const inputs = await readUploadFiles(files, parent)
+      if (!canUpload.current) throw new Error('当前连接不可编辑')
+      onUpload(inputs)
+      reveal(parent)
+      setUploadNotice(`已上传 ${files.length} 个文件`)
+    } catch (cause) {
+      report(cause)
+    } finally {
+      uploadPending.current = false
+      setUploading(false)
+    }
   }
   const beginRename = (node: FileNode) => {
     if (!writable) return
@@ -282,6 +323,7 @@ export function WorkspaceFileExplorer({
         ? [
             { key: 'new-file', label: '新建文件', disabled: !writable },
             { key: 'new-directory', label: '新建文件夹', disabled: !writable },
+            { key: 'upload', label: '上传文件', disabled: !writable || uploading },
           ]
         : []),
       { key: 'rename', label: '重命名', extra: 'F2', disabled: !writable },
@@ -302,6 +344,7 @@ export function WorkspaceFileExplorer({
       domEvent.stopPropagation()
       if (key === 'new-file') beginCreate('file', node.path)
       if (key === 'new-directory') beginCreate('directory', node.path)
+      if (key === 'upload') beginUpload(node.path)
       if (key === 'rename') beginRename(node)
       if (key === 'delete') void remove(node)
       if (key === 'move') {
@@ -357,6 +400,30 @@ export function WorkspaceFileExplorer({
           {context}
         </span>
         <div className="v2-file-heading-actions">
+          <input
+            ref={uploadInput}
+            type="file"
+            hidden
+            multiple
+            accept={UPLOAD_ACCEPT}
+            aria-label="选择上传文件"
+            disabled={!writable || uploading}
+            onChange={(event) => {
+              const files = Array.from(event.currentTarget.files ?? [])
+              event.currentTarget.value = ''
+              void upload(files)
+            }}
+          />
+          <Button
+            type="text"
+            size="small"
+            icon={<UploadOutlined />}
+            title={`上传文件到 ${context}（HTML/CSS/JS/JSON/TXT/Markdown，UTF-8，单文件最多 1 MiB）`}
+            aria-label="上传文件"
+            loading={uploading}
+            disabled={!writable || uploading}
+            onClick={() => beginUpload()}
+          />
           <Button
             type="text"
             size="small"
@@ -387,6 +454,15 @@ export function WorkspaceFileExplorer({
       </div>
       {error ? (
         <Alert type="error" title={error} showIcon closable onClose={() => setError('')} />
+      ) : null}
+      {uploadNotice ? (
+        <Alert
+          type="success"
+          title={uploadNotice}
+          showIcon
+          closable
+          onClose={() => setUploadNotice('')}
+        />
       ) : null}
       {undo ? (
         <Alert
