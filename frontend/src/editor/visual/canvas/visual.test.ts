@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { parseSource, HTML_BYTES } from '../source/registry'
 import { createProjection, MARKER } from './projection'
 import { sanitizeCss, stylesheetPath } from './css'
-import { validHello, validSelection } from './protocol'
+import { validClearHover, validHello, validSelection } from './protocol'
 
 const source =
   '<!doctype html>\r\n<html><head></head><body><div id="x"><p title="中文😀">你好😀 &amp;</p><p id="x">第二段</p></div></body></html>'
@@ -139,6 +139,11 @@ describe('capability protocol', () => {
       rect: { x: 1, y: 2, width: 30, height: 40 },
     }
     expect(validSelection(valid, r)).toBe(true)
+    expect(validSelection({ ...valid, type: 'hover' }, r)).toBe(true)
+    const clear = { type: 'clear-hover', fileId: 'f', generation: r.generation }
+    expect(validClearHover(clear, r)).toBe(true)
+    expect(validClearHover({ ...clear, generation: 'old' }, r)).toBe(false)
+    expect(validClearHover({ ...clear, extra: 'x'.repeat(100000) }, r)).toBe(false)
     for (const change of [
       { generation: 'old' },
       { fileId: 'other' },

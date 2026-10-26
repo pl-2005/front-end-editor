@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Dropdown, Input, Modal, Select, Tree } from 'antd'
+import { Alert, Button, Dropdown, Input, Modal, Select, Tooltip, Tree } from 'antd'
 import type { MenuProps, TreeDataNode } from 'antd'
 import {
   CodeOutlined,
@@ -330,11 +330,16 @@ export function WorkspaceFileExplorer({
       { key: 'move', label: '移动到…', disabled: !writable },
       {
         key: 'delete',
-        label: '删除',
+        label: protectedNode(node) ? (
+          <Tooltip title="入口文件及其所在文件夹不能删除">
+            <span>删除</span>
+          </Tooltip>
+        ) : (
+          '删除'
+        ),
         extra: 'Delete',
         danger: true,
         disabled: !writable || protectedNode(node),
-        title: protectedNode(node) ? '入口文件及其所在文件夹不能删除' : undefined,
       },
       ...(node.file?.language === 'html'
         ? [{ key: 'entry', label: '设为入口', disabled: !writable || node.file.id === entryFileId }]
@@ -384,21 +389,25 @@ export function WorkspaceFileExplorer({
       }}
     >
       <div className="v2-file-explorer-heading">
-        <Button
-          type="text"
-          size="small"
-          onClick={() => {
-            setSelection({ activeId, key: '' })
-            setEdit(null)
-            setError('')
-          }}
-          title="选择项目根目录"
-        >
-          文件
-        </Button>
-        <span className="v2-file-context" title={context} aria-label="新建位置">
-          {context}
-        </span>
+        <Tooltip title="选择项目根目录">
+          <Button
+            aria-label="选择项目根目录"
+            type="text"
+            size="small"
+            onClick={() => {
+              setSelection({ activeId, key: '' })
+              setEdit(null)
+              setError('')
+            }}
+          >
+            文件
+          </Button>
+        </Tooltip>
+        <Tooltip title={context}>
+          <span className="v2-file-context" aria-label="新建位置">
+            {context}
+          </span>
+        </Tooltip>
         <div className="v2-file-heading-actions">
           <input
             ref={uploadInput}
@@ -414,42 +423,48 @@ export function WorkspaceFileExplorer({
               void upload(files)
             }}
           />
-          <Button
-            type="text"
-            size="small"
-            icon={<UploadOutlined />}
+          <Tooltip
             title={`上传文件到 ${context}（HTML/CSS/JS/JSON/TXT/Markdown，UTF-8，单文件最多 1 MiB）`}
-            aria-label="上传文件"
-            loading={uploading}
-            disabled={!writable || uploading}
-            onClick={() => beginUpload()}
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<FileAddOutlined />}
-            title={`新建文件（${context}）`}
-            aria-label="新建文件"
-            disabled={!writable}
-            onClick={() => beginCreate('file')}
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<FolderAddOutlined />}
-            title={`新建文件夹（${context}）`}
-            aria-label="新建文件夹"
-            disabled={!writable}
-            onClick={() => beginCreate('directory')}
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<VerticalAlignMiddleOutlined />}
-            title="折叠全部目录"
-            aria-label="折叠全部目录"
-            onClick={() => setExpansion({ activePath, keys: [] })}
-          />
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<UploadOutlined />}
+              aria-label="上传文件"
+              loading={uploading}
+              disabled={!writable || uploading}
+              onClick={() => beginUpload()}
+            />
+          </Tooltip>
+          <Tooltip title={`新建文件（${context}）`}>
+            <Button
+              type="text"
+              size="small"
+              icon={<FileAddOutlined />}
+              aria-label="新建文件"
+              disabled={!writable}
+              onClick={() => beginCreate('file')}
+            />
+          </Tooltip>
+          <Tooltip title={`新建文件夹（${context}）`}>
+            <Button
+              type="text"
+              size="small"
+              icon={<FolderAddOutlined />}
+              aria-label="新建文件夹"
+              disabled={!writable}
+              onClick={() => beginCreate('directory')}
+            />
+          </Tooltip>
+          <Tooltip title="折叠全部目录">
+            <Button
+              type="text"
+              size="small"
+              icon={<VerticalAlignMiddleOutlined />}
+              aria-label="折叠全部目录"
+              onClick={() => setExpansion({ activePath, keys: [] })}
+            />
+          </Tooltip>
         </div>
       </div>
       {error ? (
@@ -553,30 +568,28 @@ export function WorkspaceFileExplorer({
                 className="v2-tree-file-title"
                 onContextMenu={() => setSelection({ activeId, key: String(node.key) })}
               >
-                <span className="v2-tree-name" title={node.path}>
-                  {node.name}
-                </span>
+                <Tooltip title={node.path}>
+                  <span className="v2-tree-name">{node.name}</span>
+                </Tooltip>
                 {node.file?.id === entryFileId ? (
-                  <span
-                    className="v2-entry-dot"
-                    role="img"
-                    aria-label="入口文件"
-                    title="入口文件"
-                  />
+                  <Tooltip title="入口文件">
+                    <span className="v2-entry-dot" role="img" aria-label="入口文件" />
+                  </Tooltip>
                 ) : null}
                 <Dropdown trigger={['click']} menu={menu(node)}>
-                  <Button
-                    className="v2-tree-more"
-                    type="text"
-                    size="small"
-                    icon={<MoreOutlined />}
-                    aria-label={`文件操作 ${node.path}`}
-                    title={`文件操作 ${node.path}`}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      setSelection({ activeId, key: String(node.key) })
-                    }}
-                  />
+                  <Tooltip title={`文件操作 ${node.path}`}>
+                    <Button
+                      className="v2-tree-more"
+                      type="text"
+                      size="small"
+                      icon={<MoreOutlined />}
+                      aria-label={`文件操作 ${node.path}`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setSelection({ activeId, key: String(node.key) })
+                      }}
+                    />
+                  </Tooltip>
                 </Dropdown>
               </span>
             </Dropdown>

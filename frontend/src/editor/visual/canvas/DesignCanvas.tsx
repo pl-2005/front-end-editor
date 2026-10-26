@@ -1,8 +1,8 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react'
 import type { FileRecord } from '../../../collaboration/document'
 import { HTML_BYTES, parseSource, type SourceRange } from '../source/registry'
 import { createProjection, type CanvasProjection } from './projection'
-import { validHello, validSelection, type SelectionMessage } from './protocol'
+import { validClearHover, validHello, validSelection, type SelectionMessage } from './protocol'
 
 export interface SourceLocation {
   fileId: string
@@ -10,14 +10,16 @@ export interface SourceLocation {
   range: SourceRange
   generation: string
   requestId: string
+  openCode?: boolean
 }
 interface Props {
   file?: FileRecord
   files: FileRecord[]
   onLocate: (location: SourceLocation) => void
+  onInspect?: (location?: SourceLocation) => void
 }
 
-export function DesignCanvas({ file, files, onLocate }: Props) {
+export function DesignCanvas({ file, files, onLocate, onInspect }: Props) {
   const source = file?.content.toString() ?? ''
   const resources = JSON.stringify(
     files.filter((f) => f.language === 'css').map((f) => [f.path, f.content.toString()]),
@@ -73,7 +75,7 @@ export function DesignCanvas({ file, files, onLocate }: Props) {
   return (
     <section className="v3-design" aria-label="只读设计画布">
       <p className="v3-design-notice">
-        只读设计：点击元素可定位源码。插入、属性修改和删除将在后续步骤开放。
+        只读设计：悬停检查，点击锁定并定位源码。插入、属性修改和删除将在后续步骤开放。
       </p>
       {reason || error ? (
         <p role="status">{reason || error}</p>
@@ -85,6 +87,7 @@ export function DesignCanvas({ file, files, onLocate }: Props) {
           files={files}
           resources={resources}
           onLocate={onLocate}
+          onInspect={onInspect}
         />
       ) : (
         <p role="status">正在更新设计副本…</p>
@@ -99,16 +102,20 @@ function CanvasFrame({
   files,
   resources,
   onLocate,
+  onInspect,
 }: {
   projection: CanvasProjection
   file: FileRecord
   files: FileRecord[]
   resources: string
   onLocate: Props['onLocate']
+  onInspect: Props['onInspect']
 }) {
   const iframe = useRef<HTMLIFrameElement>(null)
   const port = useRef<MessagePort | null>(null)
   const [selection, setSelection] = useState<SelectionMessage>()
+  const [hover, setHover] = useState<SelectionMessage>()
+  const inspect = useEffectEvent((location?: SourceLocation) => onInspect?.(location))
   const [status, setStatus] = useState('正在连接设计画布…')
   const registry = projection.registry
   const isFresh = useEffectEvent(
@@ -119,9 +126,10 @@ function CanvasFrame({
         files.filter((f) => f.language === 'css').map((f) => [f.path, f.content.toString()]),
       ) === resources,
   )
-  useEffect(() => {
+  useLayoutEffect(() => {
     let consumed = false
     let selectedNode = ''
+    let hoveredNode = ''
     let loads = 0
     let closed = false
     const fresh = () => !closed && isFresh()
@@ -129,10 +137,12 @@ function CanvasFrame({
       closed = true
       port.current?.close()
       port.current = null
+      inspect(undefined)
     }
     const timeout = setTimeout(() => {
       close()
       setSelection(undefined)
+      setHover(undefined)
       setStatus('设计通信超时，请切换模式后重试。')
     }, 5000)
     const hello = (event: MessageEvent) => {
@@ -157,7 +167,32 @@ function CanvasFrame({
           setStatus('')
           return
         }
+        if (validClearHover(event.data, registry)) {
+          hoveredNode = ''
+          setHover(undefined)
+          inspect(undefined)
+          return
+        }
         if (!validSelection(event.data, registry)) return
+        if (event.data.type === 'hover') {
+          setHover(event.data)
+          const node = registry.nodes.get(event.data.nodeId)!
+          if (hoveredNode !== node.id) {
+            hoveredNode = node.id
+            inspect(
+              node.range && node.startTag && !node.reason
+                ? {
+                    fileId: registry.fileId,
+                    source: registry.source,
+                    generation: registry.generation,
+                    range: node.range,
+                    requestId: crypto.randomUUID(),
+                  }
+                : undefined,
+            )
+          }
+          return
+        }
         setSelection(event.data)
         const node = registry.nodes.get(event.data.nodeId)!
         const changed = selectedNode !== event.data.nodeId
@@ -182,13 +217,26 @@ function CanvasFrame({
       if (++loads > 1) {
         close()
         setSelection(undefined)
+        setHover(undefined)
         setStatus('画布已重载，请切换模式重新连接。')
       }
     }
     const refresh = () => port.current?.postMessage({ type: 'refresh' })
+    const clearHover = () => {
+      hoveredNode = ''
+      setHover(undefined)
+      inspect(undefined)
+      port.current?.postMessage({ type: 'clear-hover' })
+    }
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') clearHover()
+    }
     const frame = iframe.current!
     window.addEventListener('message', hello)
     frame.addEventListener('load', loaded)
+    frame.addEventListener('pointerleave', clearHover)
+    window.addEventListener('keydown', keydown, true)
+    window.addEventListener('blur', clearHover)
     const observer = new ResizeObserver(refresh)
     observer.observe(frame)
     window.addEventListener('resize', refresh)
@@ -197,11 +245,15 @@ function CanvasFrame({
       clearTimeout(timeout)
       observer.disconnect()
       frame.removeEventListener('load', loaded)
+      frame.removeEventListener('pointerleave', clearHover)
+      window.removeEventListener('keydown', keydown, true)
+      window.removeEventListener('blur', clearHover)
       window.removeEventListener('message', hello)
       window.removeEventListener('resize', refresh)
     }
   }, [projection, registry, onLocate])
   const node = selection && registry.nodes.get(selection.nodeId)
+  const hovered = hover && registry.nodes.get(hover.nodeId)
   return (
     <>
       <div className="v3-design-actions">
@@ -224,6 +276,7 @@ function CanvasFrame({
                 generation: registry.generation,
                 range: node.range,
                 requestId: crypto.randomUUID(),
+                openCode: true,
               })
           }}
         >
@@ -260,6 +313,20 @@ function CanvasFrame({
               height: selection.rect.height,
             }}
           />
+        )}
+        {hover && hovered && (
+          <div
+            aria-hidden="true"
+            className="v3-hover"
+            style={{
+              left: hover.rect.x,
+              top: hover.rect.y,
+              width: hover.rect.width,
+              height: hover.rect.height,
+            }}
+          >
+            <span>{`<${hovered.tag}> · ${Math.round(hover.rect.width)} × ${Math.round(hover.rect.height)}${hovered.reason ? ` · ${hovered.reason}` : ''}`}</span>
+          </div>
         )}
       </div>
     </>

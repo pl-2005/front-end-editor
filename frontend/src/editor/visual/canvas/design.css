@@ -51,3 +51,53 @@
   box-sizing: border-box;
   pointer-events: none;
 }
+.v3-hover {
+  position: absolute;
+  border: 1px dashed #b45309;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+.v3-hover span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 360px;
+  padding: 2px 5px;
+  background: #78350f;
+  color: white;
+  font-size: 11px;
+}
+.v3-source-hover {
+  background: #fbbf2440;
+  outline: 1px solid #d97706;
+}
+.v3-runtime-preview {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.v3-runtime-actions {
+  position: absolute;
+  bottom: 38px;
+  left: 8px;
+  right: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #ffffffed;
+  box-shadow: 0 1px 6px #0003;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.v3-runtime-actions span {
+  flex: 1;
+}
+.v3-runtime-overlays {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}

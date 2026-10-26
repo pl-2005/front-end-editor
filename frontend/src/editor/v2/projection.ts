@@ -2,7 +2,11 @@ import type { CollaborationSession } from '../../collaboration/session'
 import { readDocument } from '../../collaboration/document'
 import { prepareSandpackFiles } from '../sandpackRuntime'
 import type { ProjectFiles } from '../../types/project'
-export function previewProjection(session: Pick<CollaborationSession, 'doc' | 'identity'>) {
+import type { RuntimeProjection } from '../visual/canvas/runtimeProjection'
+export function previewProjection(
+  session: Pick<CollaborationSession, 'doc' | 'identity'>,
+  inspector?: RuntimeProjection,
+) {
   const { files, entryFileId } = readDocument(session.doc, session.identity)
   const source = Object.fromEntries(
     files.map((f) => [f.path, { code: f.content.toString() }]),
@@ -17,7 +21,7 @@ export function previewProjection(session: Pick<CollaborationSession, 'doc' | 'i
       }),
     }
   return {
-    files: prepareSandpackFiles(source),
+    files: prepareSandpackFiles(inspector ? inspector.project(files, source) : source),
     entry: files.find((f) => f.id === entryFileId)!.path,
   }
 }

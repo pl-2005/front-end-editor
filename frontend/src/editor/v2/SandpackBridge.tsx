@@ -9,12 +9,16 @@ import {
   type ReactNode,
 } from 'react'
 import { SandpackPreview, SandpackProvider, useSandpack } from '@codesandbox/sandpack-react'
+import { ReloadOutlined } from '@ant-design/icons'
+import { Button, Tooltip } from 'antd'
 import { PreviewConsole } from '../PreviewConsole'
 import { RestartPreviewButton } from '../RestartPreviewButton'
 import type { CollaborationSession } from '../../collaboration/session'
 import type { ProjectFiles } from '../../types/project'
 import { previewProjection } from './projection'
 import { useFeedback } from '../../ui/useNotice'
+import { RuntimeProjection } from '../visual/canvas/runtimeProjection'
+import { RuntimeInspector, type RuntimeInspectionProps } from '../visual/canvas/RuntimeInspector'
 /** Sandpack runs code at its own remote origin; disallow parent navigation and referrer disclosure. */
 function PreviewBoundary({ children }: { children: ReactNode }) {
   const container = useRef<HTMLDivElement>(null)
@@ -41,11 +45,13 @@ function Projection({
   entry,
   initialFiles,
   onRestart,
+  inspector,
 }: {
   session: CollaborationSession
   entry: string
   initialFiles: ProjectFiles
   onRestart: () => void
+  inspector: RuntimeProjection
 }) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot)
   const { sandpack, listen, dispatch } = useSandpack()
@@ -71,7 +77,7 @@ function Projection({
       deadline = undefined
       if (stopped) return
       try {
-        const next = previewProjection(session),
+        const next = previewProjection(session, inspector),
           current = runtime.current
         for (const path of Object.keys(current.files))
           if (!Object.hasOwn(next.files, path)) current.deleteFile(path, false)
@@ -135,7 +141,7 @@ function Projection({
       unsubscribe()
       session.doc.off('update', schedule)
     }
-  }, [session, entry, initialFiles])
+  }, [session, entry, initialFiles, inspector])
   useFeedback({
     error,
     notice:
@@ -148,9 +154,27 @@ function Projection({
       <SandpackPreview
         startRoute={entry === '/index.html' ? '/' : entry}
         showOpenInCodeSandbox={false}
-        showRefreshButton
+        showRefreshButton={false}
         showRestartButton={false}
-        actionsChildren={<RestartPreviewButton onRestart={onRestart} />}
+        actionsChildren={
+          <>
+            <RestartPreviewButton onRestart={onRestart} />
+            {sandpack.status === 'running' ? (
+              <Tooltip title="刷新预览">
+                <Button
+                  className="sp-button"
+                  type="text"
+                  size="small"
+                  shape="circle"
+                  htmlType="button"
+                  icon={<ReloadOutlined />}
+                  aria-label="刷新预览"
+                  onClick={() => dispatch({ type: 'refresh' })}
+                />
+              </Tooltip>
+            ) : null}
+          </>
+        }
       />
       <details className="v2-console">
         <summary>控制台</summary>
@@ -163,16 +187,20 @@ export function SandpackBridge({
   session,
   entry,
   structureKey,
+  inspecting,
+  onLocate,
+  onInspect,
 }: {
   session: CollaborationSession
   entry: string
   structureKey: string
-}) {
+} & RuntimeInspectionProps) {
   const [runtimeGeneration, setRuntimeGeneration] = useState(0)
+  const [inspector] = useState(() => new RuntimeProjection())
   const restart = useCallback(() => setRuntimeGeneration((generation) => generation + 1), [])
   const initial = useMemo(
-    () => ({ ...previewProjection(session), entry, structureKey, runtimeGeneration }),
-    [session, entry, structureKey, runtimeGeneration],
+    () => ({ ...previewProjection(session, inspector), entry, structureKey, runtimeGeneration }),
+    [session, entry, structureKey, runtimeGeneration, inspector],
   )
   const customSetup = useMemo(() => ({ entry }), [entry])
   return (
@@ -185,12 +213,21 @@ export function SandpackBridge({
       theme="light"
     >
       <PreviewBoundary>
-        <Projection
+        <RuntimeInspector
           session={session}
-          entry={entry}
-          initialFiles={initial.files}
-          onRestart={restart}
-        />
+          projection={inspector}
+          inspecting={inspecting}
+          onLocate={onLocate}
+          onInspect={onInspect}
+        >
+          <Projection
+            session={session}
+            entry={entry}
+            initialFiles={initial.files}
+            onRestart={restart}
+            inspector={inspector}
+          />
+        </RuntimeInspector>
       </PreviewBoundary>
     </SandpackProvider>
   )

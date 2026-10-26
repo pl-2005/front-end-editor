@@ -2,6 +2,8 @@
 
 状态：待实施。对应 R2/R5/R7/R8，重点验证 A5–A8。前置：[步骤 1](01-source-and-safe-canvas.md)完成；只用一个按钮模板证明整个写入闭环。
 
+2026-10-25 优化：技术选择及接口以[实施约定](../implementation-contracts.md)为准。实际推进按 2A 历史候选 → 2B 存储与提交保护 → 2C Bootstrap/按钮 → 2D 协作闭环，以下 2.1–2.5 是任务分组，不表示在存储完成前开放 Bootstrap 写入。
+
 ## 目标与改动位置
 
 先通过“准备 Bootstrap → 按钮插入 → 删除 → 撤销/重做 → 双会话/离线检查 → 刷新找回材料”，再扩展模板。按钮先走点击插入，无需等拖拽 UI。
@@ -22,9 +24,10 @@
 
 1. 将 UndoManager 生命周期移到持有 session 的工作区或 session 服务；保持原 files 作用域，统一跟踪 MonacoBinding 与 VISUAL_ORIGIN。BOOTSTRAP_ORIGIN 和 STRUCTURE_ORIGIN 不作为正文历史来源。
 2. 当前 session.undo 的 scratch 管理器使用默认配置；调整为与 live 完全相同的 scope、trackedOrigins、captureTimeout 及必要配置。保留现有 redone 元数据处理，验证多次 undo/redo，不简单替换为全页文本。
-3. 拆出无 live 写入的历史候选预检，返回受影响 fileId、before/after、预算结果和历史栈身份/版本。当前 preview 复制栈行为也须验证没有提前改变 live 栈项。
+3. 拆出无 live 写入的历史候选预检，按实施约定返回全部受影响 fileId、before/after、源码 revision、Update 增长上界及 session/栈 revision/topItemId 令牌。复制预检会修改的栈项集合、元数据及 redone 信息，不仅复制栈数组；连续预检须证明没有提前改变 live 栈项。
 4. 工具栏和快捷键调用同一历史入口。空栈不写恢复记录；拒绝操作不 pop 栈，异步等待期间若栈或文件变化，取消并提示。
 5. 每个可视化命令前后 stopCapturing；代码输入保留既有合理分组。Bootstrap 准备前后也断组，但不清空历史。模式切换、源码区收起不销毁历史。
+6. 纯代码且不涉及设计记录的历史保留原保护；涉及设计记录的文件保存可逆材料并应用检查门禁。一个栈项跨多个文件时整体预检、落盘、提交或拒绝；不把设计 HTML 上限应用到普通 JS/CSS 历史。
 
 ### 2.2 实现局部补丁和确定性创建
 
@@ -33,6 +36,7 @@
 3. action 只使用传入 doc；所有 ID、时间及随机目录名在 action 外生成，不访问异步存储、不发通知。session.mutate 会分别执行 scratch 和 live，两个结果必须一致。
 4. 为已有文件创建逻辑提供受校验的固定 ID 参数或窄范围创建方法，保留原调用兼容；检查 ID/路径占用、目录、fileOrder、language 和 deletedAt，不绕过现有 readDocument。
 5. 失败依靠预检零写入，不能依赖 Yjs 事务抛异常回滚。测试 scratch/live 的 ID、路径、正文与返回值一致。
+6. 从按钮开始应用实施约定的结构插入矩阵及候选源码再解析，核对模板、父级、兄弟和既有关系；p 内插 div、嵌套链接及通过内部 div 绕过交互祖先均须拒绝，不能等步骤 3 再补。
 
 ### 2.3 准备 Bootstrap 独立资源
 
@@ -46,14 +50,14 @@
 
 ### 2.4 实现恢复存储和容量协调
 
-1. 按 userId/projectId/epoch/fileId 隔离记录，至少保存基线、最近本地意图、最新合并正文、未清理破坏性操作前正文/片段。操作携带唯一 ID、顺序和 prepared/committed 状态。
-2. 基线在第一次设计写入前落盘；每次设计和可能移除内容的历史操作先保存 before/after 及必要的保留内容。后续意图不能覆盖之前未清理的材料。
-3. 落盘成功指 IndexedDB transaction complete，不是发出 put 请求。先写 prepared，live 写入成功后改 committed；崩溃留下 prepared 时重开提示检查，不自动重放。
-4. 恢复累计上限暂定 5 MiB，并与现有 CACHE_LIMIT 联合计量。保留 OFFLINE_LIMIT 独立门禁：即使恢复存储有空间，也不能绕过原离线更新容量。
-5. 同用户多标签并发追加必须在事务内计量并合并，避免覆盖材料或重复透支预算。选择存入现有 custom 或独立侧车数据库前，验证与 y-indexeddb schema、压缩及清理兼容。
-6. 若用独立数据库，显式接入 clearOtherEpochs、purgeUserCaches、purgeProjectCaches 和活动连接关闭；不能直接采用会被 clearOtherEpochs 误删的命名方式。数据库枚举不支持时也要清理已知活动记录。
-7. durable 可压缩既有更新日志，但不清设计材料；用户确认检查也保留检查基线。只由显式清理或既有撤权/epoch 规则清理，普通导航关闭连接但保留材料。
-8. 写失败、超限或 committed 标记失败时保留已落盘材料并停止相关设计/历史操作。live 已提交时如实提示，不尝试整页回滚；重开依 prepared 材料人工检查。
+1. 固定使用原 userId/projectId/epoch 数据库的 custom store，键前缀 `visual:v1:`；按 fileId 关联材料，复用已有关闭及清理路径，不新建侧车数据库。升级兼容、压缩不丢材料和撤权不复活都须验证。
+2. 按实施约定保存不可变基线、可逆补丁、操作前内容及必要合并快照；操作有唯一 ID、缓存单调序号和 prepared/committed/canceled 状态。before/after 必须能精确重建，不要求每次整页复制；断链先保存新快照。
+3. transaction complete 才算 prepared 成功。live 成功、关联日志落盘及状态事务完成后标 committed；失败保留 prepared 并提示实际状态，不整页回滚，不自动重放。
+4. 材料 R 最多 5 MiB；updates 字节 U、材料 R、update 预留 Q 同时满足 `U + R + Q <= CACHE_LIMIT`。原 OFFLINE_LIMIT 独立存在；预算作用域固定为同 user/project/epoch，跨标签共享。
+5. 统一改造 OfflineLog 的 save/acknowledge 与恢复追加/清理，在同一个 updates/custom readwrite 事务中读取最新计量、追加材料和预留、消费或释放预留；不能两边分别检查。候选 Update 编码上界须覆盖 live，不能直接用 scratch 长度当保证。
+6. 在同一 custom 事务记录 fileId/owner/operationId/revision，实现跨标签同文件设计提交排他；多文件历史一次申请全部文件。进程内队列及广播不能替代数据库条件校验。崩溃预留经日志核对后结算，不仅按超时回收。
+7. durable 压缩不清材料或未消费预留；确认检查也保留基线。显式清理原子释放记录及无引用内容，不清其他文件共享的材料，不允许清正在提交的文件。展示占用、缺口和清理影响，不自动淘汰。
+8. 材料超限拒绝设计/受影响历史。远端文本超预算不拒收，保留旧材料并标记最新合并副本未保存；日志也失败时沿用 session 存储失败门禁。committed 标记失败时如实区分源码已提交与本机未确认状态。
 
 ### 2.5 连接统一写入和并发检查
 
@@ -63,10 +67,10 @@
 读取本代目标与当前源码
 → 检查会话/身份/目标/检查状态
 → 建候选补丁或历史结果，预检预算
-→ 串行化同文件本地提交，持久写入 prepared 材料
+→ 申请受影响文件提交资格，原子写入 prepared 材料与 Update 预留
 → 重新检查源码/代次/权限/历史栈/容量
 → session.mutate 或经保护的 live undo/redo
-→ 标记 committed，重建画布，更新本地意图
+→ 关联日志落盘并消费预留，标记 committed，释放提交资格，更新画布和本地意图
 ```
 
 1. 恢复落盘期间阻止同文件新的本地写入，包括 Monaco、设计、Bootstrap 和会影响目标的文件操作；UI 只读与命令级检查一起接入。期间远端更新仍可到达，落盘后复核失败就取消，不能锁住或回滚远端事务。
@@ -90,6 +94,11 @@
 | 恢复写失败/总缓存满/离线日志满 | 设计和受影响历史拒绝；无部分源码写入、无自动清理未解决材料 |
 | 确认 → 后续迟到更新 | 重新提示检查；复制/局部修复可用 |
 | 撤权/epoch 变化 | 材料和旧通道按规则清理，旧请求不重放 |
+| 两标签争最后容量/同文件同时提交 | 原子预算不超额、不覆盖记录；同文件设计有唯一提交资格，失败者零项目写入 |
+| 200 KiB 页连续 100 次小属性修改 | 记录材料实际字节与重建结果；不逐操作复制两份整页，超限前拒绝且已有材料仍可复制 |
+| 代码断链/大历史替换/远端副本超限 | 新快照依赖正确；旧材料不丢；未落盘的最新副本有明确提示 |
+| 重复预检/远端更新/跨文件历史 | live 栈项与 redone 未被预检修改；旧令牌拒绝，任一文件保护失败整体不消耗栈 |
+| Update 时钟/clientId 编码边界与崩溃预留 | 实际编码不超过预留；重开不直接释放未知操作，不因旧回调复活已清理材料 |
 
 扩展现有 document/session/session.offline/offline 测试，补历史分组和真实源码断言；双会话、离线重开和 IndexedDB 崩溃恢复须有真实浏览器证据。
 

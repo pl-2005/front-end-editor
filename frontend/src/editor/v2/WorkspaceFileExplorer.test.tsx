@@ -97,7 +97,7 @@ describe('WorkspaceFileExplorer', () => {
 
   it('reports upload conflicts without importing any files and permits retry', async () => {
     const { f } = setup()
-    fireEvent.click(screen.getByTitle('选择项目根目录'))
+    fireEvent.click(screen.getByRole('button', { name: '选择项目根目录' }))
     fireEvent.click(screen.getByRole('button', { name: '上传文件' }))
     const input = screen.getByLabelText('选择上传文件')
     fireEvent.change(input, {
@@ -120,7 +120,7 @@ describe('WorkspaceFileExplorer', () => {
     enterName('文件名', 'helper.js')
     expect(callbacks.onCreate).toHaveBeenCalledWith('/src/helper.js', 'file')
     expect(screen.getByText('helper.js')).toBeTruthy()
-    fireEvent.click(screen.getByTitle('选择项目根目录'))
+    fireEvent.click(screen.getByRole('button', { name: '选择项目根目录' }))
     fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }))
     enterName('文件夹名', 'new-folder')
     expect(readDocument(f.doc, f.identity).directories).toContain('/new-folder')

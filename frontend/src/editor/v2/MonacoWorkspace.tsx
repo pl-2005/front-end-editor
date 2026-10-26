@@ -14,6 +14,7 @@ interface Props {
   activeId: string
   writable: boolean
   sourceLocation?: SourceLocation
+  inspection?: SourceLocation
 }
 interface BoundModel {
   model: monaco.editor.ITextModel
@@ -26,7 +27,14 @@ interface BoundModel {
   view?: monaco.editor.ICodeEditorViewState | null
 }
 /** Imperative models avoid React renders for every keystroke; only Y.Text is authoritative. */
-export function MonacoWorkspace({ session, files, activeId, writable, sourceLocation }: Props) {
+export function MonacoWorkspace({
+  session,
+  files,
+  activeId,
+  writable,
+  sourceLocation,
+  inspection,
+}: Props) {
   const host = useRef<HTMLDivElement>(null)
   const runtime = useRef<{
     editor: monaco.editor.IStandaloneCodeEditor
@@ -407,6 +415,37 @@ export function MonacoWorkspace({ session, files, activeId, writable, sourceLoca
     current.editor.revealRangeInCenter(selection)
     current.editor.focus()
   }, [sourceLocation, activeId, files])
+  useEffect(() => {
+    const current = runtime.current
+    if (!current || !inspection || inspection.fileId !== activeId) return
+    const bound = current.models.get(activeId)
+    const { source, range } = inspection
+    if (
+      !bound ||
+      bound.text.toString() !== source ||
+      bound.model.getValue() !== source ||
+      range.start < 0 ||
+      range.end > source.length ||
+      range.start > range.end
+    )
+      return
+    const start = bound.model.getPositionAt(range.start)
+    const end = bound.model.getPositionAt(range.end)
+    const highlight = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column)
+    const decorations = current.editor.createDecorationsCollection([
+      {
+        range: highlight,
+        options: { className: 'v3-source-hover' },
+      },
+    ])
+    if (!current.editor.getVisibleRanges().some((visible) => visible.containsRange(highlight)))
+      current.editor.revealRangeInCenterIfOutsideViewport(highlight)
+    const changed = bound.model.onDidChangeContent(() => decorations.clear())
+    return () => {
+      changed.dispose()
+      decorations.clear()
+    }
+  }, [inspection, activeId, session])
   const active = files.find((f) => f.id === activeId)
   const budgetExceeded =
     active && languageFor(active.language, active.content.toString()).startsWith('budget-')

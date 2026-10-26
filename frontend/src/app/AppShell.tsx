@@ -7,7 +7,7 @@ import {
   TeamOutlined,
   UpOutlined,
 } from '@ant-design/icons'
-import { Button, Layout, Menu } from 'antd'
+import { Button, Layout, Menu, Tooltip } from 'antd'
 import { useState, useSyncExternalStore } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { getAuthError, logout, refreshCredentials, subscribeAuth } from '../api/auth'
@@ -74,36 +74,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
           <div className="v2-account">
             <span>{user?.displayName}</span>
-            <Button
-              danger
-              icon={<LogoutOutlined />}
-              htmlType="button"
-              title="退出当前用户"
-              aria-label="退出当前用户"
-              loading={task.busy}
-              disabled={task.busy}
-              onClick={() =>
-                void task.run(async () => {
-                  const result = await logout()
-                  if (result.outcome === 'revoked') show('已退出登录', 'success')
-                  navigate('/login', { replace: true })
-                })
-              }
-            />
+            <Tooltip title="退出当前用户">
+              <Button
+                danger
+                icon={<LogoutOutlined />}
+                htmlType="button"
+                aria-label="退出当前用户"
+                loading={task.busy}
+                disabled={task.busy}
+                onClick={() =>
+                  void task.run(async () => {
+                    const result = await logout()
+                    if (result.outcome === 'revoked') show('已退出登录', 'success')
+                    navigate('/login', { replace: true })
+                  })
+                }
+              />
+            </Tooltip>
           </div>
         </div>
-        <Button
-          className="v2-topbar-toggle"
-          type="text"
-          size="small"
-          htmlType="button"
-          icon={topbarCollapsed ? <DownOutlined /> : <UpOutlined />}
-          title={topbarCollapsed ? '展开顶部栏' : '折叠顶部栏'}
-          aria-label={topbarCollapsed ? '展开顶部栏' : '折叠顶部栏'}
-          aria-expanded={!topbarCollapsed}
-          aria-controls="v2-topbar-content"
-          onClick={() => setTopbarCollapsed((value) => !value)}
-        />
+        <Tooltip title={topbarCollapsed ? '展开顶部栏' : '折叠顶部栏'}>
+          <Button
+            className="v2-topbar-toggle"
+            type="text"
+            size="small"
+            htmlType="button"
+            icon={topbarCollapsed ? <DownOutlined /> : <UpOutlined />}
+            aria-label={topbarCollapsed ? '展开顶部栏' : '折叠顶部栏'}
+            aria-expanded={!topbarCollapsed}
+            aria-controls="v2-topbar-content"
+            onClick={() => setTopbarCollapsed((value) => !value)}
+          />
+        </Tooltip>
       </Layout.Header>
       <Layout.Content className="v2-content">
         {user && authError && (

@@ -8,7 +8,7 @@ import type { TeamProjectDetails } from '../../types/collaboration'
 import { fileCommands, readDocument } from '../../collaboration/document'
 import { CollaborationSession, isDurable, type ConnectionState } from '../../collaboration/session'
 import { MonacoWorkspace } from './MonacoWorkspace'
-import { DesignCanvas, type SourceLocation } from '../visual/canvas/DesignCanvas'
+import type { SourceLocation } from '../visual/canvas/DesignCanvas'
 import '../visual/canvas/design.css'
 import { SandpackBridge } from './SandpackBridge'
 import { WorkspaceFileExplorer } from './WorkspaceFileExplorer'
@@ -42,9 +42,10 @@ function ConnectedWorkspace({
   const [showCode, setShowCode] = useState(true)
   const [mode, setMode] = useState<'run' | 'design'>('run')
   const [sourceLocation, setSourceLocation] = useState<SourceLocation>()
+  const [inspection, setInspection] = useState<SourceLocation>()
   const locateSource = useCallback((location: SourceLocation) => {
     setChosenId(location.fileId)
-    setShowCode(true)
+    setShowCode((visible) => visible || !!location.openCode)
     setSourceLocation(location)
   }, [])
   const [showFiles, setShowFiles] = useState(true)
@@ -396,24 +397,20 @@ function ConnectedWorkspace({
                   files={document.files}
                   activeId={activeId}
                   writable={state.writable}
-                  sourceLocation={sourceLocation}
+                  sourceLocation={showCode ? sourceLocation : undefined}
+                  inspection={mode === 'design' && showCode ? inspection : undefined}
                 />
               </div>
             }
             preview={
-              mode === 'design' ? (
-                <DesignCanvas
-                  file={document.files.find((f) => f.id === activeId)}
-                  files={document.files}
-                  onLocate={locateSource}
-                />
-              ) : (
-                <SandpackBridge
-                  session={session}
-                  entry={entry}
-                  structureKey={JSON.stringify(document.files.map((f) => f.path).sort())}
-                />
-              )
+              <SandpackBridge
+                session={session}
+                entry={entry}
+                structureKey={JSON.stringify(document.files.map((f) => f.path).sort())}
+                inspecting={mode === 'design'}
+                onLocate={locateSource}
+                onInspect={setInspection}
+              />
             }
           />
         </>

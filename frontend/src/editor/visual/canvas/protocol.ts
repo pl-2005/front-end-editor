@@ -1,6 +1,6 @@
 import type { SourceRegistry } from '../source/registry'
 export interface SelectionMessage {
-  type: 'select'
+  type: 'select' | 'hover'
   fileId: string
   generation: string
   nodeId: string
@@ -14,7 +14,7 @@ export function validSelection(
   const m = value as Partial<SelectionMessage>
   if (
     Object.keys(m).sort().join(',') !== 'fileId,generation,nodeId,rect,type' ||
-    m.type !== 'select' ||
+    !['select', 'hover'].includes(m.type ?? '') ||
     m.fileId !== registry.fileId ||
     m.generation !== registry.generation ||
     typeof m.nodeId !== 'string' ||
@@ -22,7 +22,11 @@ export function validSelection(
     !registry.nodes.has(m.nodeId)
   )
     return false
-  const rect = m.rect
+  return validRect(m.rect)
+}
+export function validRect(value: unknown): value is SelectionMessage['rect'] {
+  if (!value || typeof value !== 'object') return false
+  const rect = value as SelectionMessage['rect']
   return (
     !!rect &&
     Object.keys(rect).sort().join(',') === 'height,width,x,y' &&
@@ -31,6 +35,16 @@ export function validSelection(
     ) &&
     rect.width >= 0 &&
     rect.height >= 0
+  )
+}
+export function validClearHover(value: unknown, registry: SourceRegistry): boolean {
+  if (!value || typeof value !== 'object') return false
+  const m = value as Record<string, unknown>
+  return (
+    Object.keys(m).sort().join(',') === 'fileId,generation,type' &&
+    m.type === 'clear-hover' &&
+    m.fileId === registry.fileId &&
+    m.generation === registry.generation
   )
 }
 export function validHello(value: unknown, capability: string, registry: SourceRegistry): boolean {

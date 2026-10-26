@@ -36,17 +36,55 @@ function bridge(config: {
   let port: MessagePort | undefined
   let selected: Element | null = null
   let connected = false
-  const report = () => {
-    if (!selected || !port) return
-    const r = selected.getBoundingClientRect()
-    port.postMessage({
-      type: 'select',
+  let hovered: Element | null = null
+  let pending = 0
+  let lastHover = ''
+  const reportNode = (element: Element | null, type: 'select' | 'hover') => {
+    if (!element || !port) return
+    const r = element.getBoundingClientRect()
+    const message = {
+      type,
       fileId: config.fileId,
       generation: config.generation,
-      nodeId: selected.getAttribute(config.marker),
+      nodeId: element.getAttribute(config.marker),
       rect: { x: r.x, y: r.y, width: r.width, height: r.height },
-    })
+    }
+    if (type === 'hover') {
+      const signature = JSON.stringify(message)
+      if (signature === lastHover) return
+      lastHover = signature
+    }
+    port.postMessage(message)
   }
+  const report = () => {
+    pending = 0
+    reportNode(hovered, 'hover')
+    reportNode(selected, 'select')
+  }
+  const schedule = () => {
+    if (!pending) pending = requestAnimationFrame(report)
+  }
+  const clearHover = () => {
+    hovered = null
+    lastHover = ''
+    cancelAnimationFrame(pending)
+    pending = 0
+    port?.postMessage({ type: 'clear-hover', fileId: config.fileId, generation: config.generation })
+  }
+  const hit = (target: EventTarget | null) =>
+    target instanceof Element ? target.closest(`[${config.marker}]`) : null
+  document.addEventListener('pointermove', (event) => {
+    hovered = hit(event.target)
+    if (hovered) schedule()
+    else clearHover()
+  })
+  document.documentElement.addEventListener('pointerleave', clearHover)
+  window.addEventListener('blur', clearHover)
+  window.addEventListener('pagehide', () => {
+    clearHover()
+    port?.close()
+    port = undefined
+  })
   window.addEventListener('message', (event) => {
     if (
       connected ||
@@ -62,8 +100,9 @@ function bridge(config: {
     port.onmessage = (event) => {
       if (event.data?.type === 'parent') {
         selected = selected?.parentElement?.closest(`[${config.marker}]`) ?? null
-        report()
-      } else if (event.data?.type === 'refresh') report()
+        reportNode(selected, 'select')
+      } else if (event.data?.type === 'refresh') schedule()
+      else if (event.data?.type === 'clear-hover') clearHover()
     }
     port.start()
     port.postMessage({ type: 'ready', fileId: config.fileId, generation: config.generation })
@@ -73,8 +112,8 @@ function bridge(config: {
     (event) => {
       event.preventDefault()
       event.stopPropagation()
-      selected = (event.target as Element).closest(`[${config.marker}]`)
-      report()
+      selected = hit(event.target)
+      reportNode(selected, 'select')
     },
     true,
   )
@@ -82,13 +121,14 @@ function bridge(config: {
   document.addEventListener(
     'keydown',
     (event) => {
+      if (event.key === 'Escape') clearHover()
       if (event.key === 'Enter' || event.key === ' ') event.preventDefault()
     },
     true,
   )
-  window.addEventListener('scroll', report, true)
-  window.addEventListener('resize', report)
-  new ResizeObserver(report).observe(document.documentElement)
+  window.addEventListener('scroll', schedule, true)
+  window.addEventListener('resize', schedule)
+  new ResizeObserver(schedule).observe(document.documentElement)
   parent.postMessage(
     {
       type: 'hello',

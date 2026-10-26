@@ -87,6 +87,50 @@ describe('DesignCanvas lifecycle', () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
+  it('keeps inspection separate from locked selection and clears only transient state', async () => {
+    const props = { ...fixture(), onInspect: vi.fn() }
+    const { unmount } = render(<DesignCanvas {...props} />)
+    const iframe = await frame()
+    const connected = await connect(iframe)
+    connected.select()
+    const doc = new DOMParser().parseFromString(iframe.srcdoc, 'text/html')
+    const parentId = doc.querySelector('main')!.getAttribute('data-editor-node')
+    connected.select({ type: 'hover', nodeId: parentId })
+    expect(props.onLocate).toHaveBeenCalledTimes(1)
+    const inspection = props.onInspect.mock.calls.at(-1)![0]
+    expect(inspection.source.slice(inspection.range.start, inspection.range.end)).toContain(
+      '<main>',
+    )
+    expect(screen.getByText('<p> · 源码范围明确')).toBeTruthy()
+    connected.select({
+      type: 'hover',
+      nodeId: parentId,
+      rect: { x: 1, y: -3, width: 200, height: 100 },
+    })
+    expect(props.onInspect).toHaveBeenCalledTimes(1)
+    fireEvent.pointerLeave(iframe)
+    expect(props.onInspect).toHaveBeenLastCalledWith(undefined)
+    expect(screen.getByText('<p> · 源码范围明确')).toBeTruthy()
+    expect(connected.channel.port1.postMessage).toHaveBeenCalledWith({ type: 'clear-hover' })
+    connected.select({ type: 'hover', generation: 'old' })
+    expect(props.onInspect).toHaveBeenCalledTimes(2)
+    connected.select({ type: 'hover' })
+    // Monaco may stop bubbling keyboard events; the canvas listens in capture.
+    const stop = (event: KeyboardEvent) => event.stopPropagation()
+    document.body.addEventListener('keydown', stop)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    document.body.removeEventListener('keydown', stop)
+    expect(props.onInspect).toHaveBeenLastCalledWith(undefined)
+    expect(screen.getByText('<p> · 源码范围明确')).toBeTruthy()
+    connected.select({ type: 'hover' })
+    fireEvent.blur(window)
+    expect(props.onInspect).toHaveBeenLastCalledWith(undefined)
+    expect(screen.getByText('<p> · 源码范围明确')).toBeTruthy()
+    unmount()
+    expect(props.onInspect).toHaveBeenLastCalledWith(undefined)
+    expect(props.file.content.toString()).toContain('中文😀 &amp;')
+    props.doc.destroy()
+  })
   it('authenticates the iframe source, consumes hello once, selects and locates exact source', async () => {
     const props = fixture()
     const { rerender, unmount } = render(<DesignCanvas {...props} />)

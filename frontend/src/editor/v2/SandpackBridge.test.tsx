@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import { act, fireEvent, render as renderUI, screen } from '@testing-library/react'
 import { AppTheme } from '../../ui/AppTheme'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -13,6 +13,7 @@ const runtime = vi.hoisted(() => {
   const files: Record<string, { code: string }> = {}
   return {
     files,
+    status: 'running',
     updateFile: vi.fn((next: typeof files) => Object.assign(files, next)),
     deleteFile: vi.fn(),
     dispatch: vi.fn(),
@@ -22,7 +23,11 @@ const runtime = vi.hoisted(() => {
   }
 })
 vi.mock('@codesandbox/sandpack-react', () => ({
-  SandpackProvider: ({ children }: { children: ReactNode }) => {
+  SandpackProvider: ({ children, files }: { children: ReactNode; files: typeof runtime.files }) => {
+    useState(() => {
+      Object.assign(runtime.files, files)
+      return 0
+    })
     return children
   },
   SandpackPreview: ({
@@ -86,6 +91,28 @@ afterEach(() => {
   Object.keys(runtime.files).forEach((k) => delete runtime.files[k])
 })
 describe('Sandpack document projection lifecycle', () => {
+  it('preserves the running iframe and files when inspection is toggled', () => {
+    const f = fixture()
+    const props = {
+      session: f as unknown as CollaborationSession,
+      entry: '/index.html',
+      structureKey: 'initial',
+    }
+    const view = render(<SandpackBridge {...props} inspecting={false} />)
+    const frame = screen.getByTitle('Sandpack Preview')
+    const code = runtime.files['/index.html'].code
+    runtime.updateFile.mockClear()
+    for (const inspecting of [true, false, true, false]) {
+      view.rerender(<SandpackBridge {...props} inspecting={inspecting} />)
+      expect(screen.getByTitle('Sandpack Preview')).toBe(frame)
+      expect(runtime.files['/index.html'].code).toBe(code)
+    }
+    expect(runtime.updateFile).not.toHaveBeenCalled()
+    expect(runtime.dispatch).not.toHaveBeenCalled()
+    expect(f.text.toString()).toBe('<h1>Initial</h1>')
+    view.unmount()
+    f.doc.destroy()
+  })
   it('recreates the preview from the latest document on restart without changing its source', () => {
     vi.useFakeTimers()
     const f = fixture(),
@@ -97,12 +124,15 @@ describe('Sandpack document projection lifecycle', () => {
         />,
       )
     const frame = screen.getByTitle('Sandpack Preview')
+    fireEvent.click(screen.getByRole('button', { name: '刷新预览' }))
+    expect(runtime.dispatch).toHaveBeenCalledWith({ type: 'refresh' })
+    expect(screen.getByTitle('Sandpack Preview')).toBe(frame)
     act(() => f.text.insert(0, '<!-- latest -->'))
     const source = f.text.toString()
     fireEvent.click(screen.getAllByRole('button', { name: /重启预览|Restart script/ })[0])
     expect(screen.getByTitle('Sandpack Preview')).not.toBe(frame)
     expect(runtime.dispatch).not.toHaveBeenCalledWith({ type: 'shell/restart' })
-    expect(runtime.updateFile.mock.calls.at(-1)?.[0]['/index.html'].code).toContain('latest')
+    expect(runtime.files['/index.html'].code).toContain('latest')
     expect(f.text.toString()).toBe(source)
     expect(f.doc.getMap('files').size).toBe(1)
     const restartedFrame = screen.getByTitle('Sandpack Preview')
