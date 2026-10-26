@@ -1,8 +1,8 @@
 # V3 详细开发步骤与实施总计划
 
-日期：2026-10-26 更新。状态：步骤 1 已完成，基础版见[历史证据](evidence/step01.md)，悬停检查、点击锁定与源码高亮见[增量证据](evidence/step01-hover.md)；步骤 2–5 待实施，下一步进入步骤 2A。
+日期：2026-10-26 更新。状态：步骤 1 只读运行检查及新增边界已完成，见[本轮证据](evidence/step01-runtime-hardening.md)；基础版见[历史证据](evidence/step01.md)，悬停检查见[增量证据](evidence/step01-hover.md)。步骤 2–5 待实施，下一步推进 2A 历史候选、2B 恢复存储与预算；全部写入前置通过后才开放 2C。
 
-同日用户明确要求设计时保留当前运行页，现已改为[同一 iframe 的运行页检查](runtime-inspection.md)。下文历史基线及步骤表中的独立静态 iframe、禁用用户脚本/CSS 清洗要求由该约定取代。步骤 2/3 不得把运行时消息视为安全写入依据，仍须父层验证当前静态源码。
+同日用户明确要求设计时保留当前运行页，现已改为[同一 iframe 的运行页检查](runtime-inspection.md)。现行步骤表已同步运行检查；历史静态实现仅保留在基线记录和 evidence。优化理由与待验证问题见[选择方案评审](selection-review.md)。步骤 2/3 不得把运行时消息视为安全写入依据，仍须父层验证当前静态源码。
 
 本文作为实施入口；功能范围以[需求](requirements.md)为准，实现边界以[技术方案](technical-design.md)为准，交付判断以[验收](acceptance.md)为准。保留现有五步顺序，不恢复旧版十一阶段及跨文件整体撤销方案。
 
@@ -22,7 +22,7 @@
 
 当前恢复提示主要针对远端删除的文件，不等同于 V3 的基线、本地意图、破坏性操作前材料和整文件并发检查。已有 undo 预检也不能直接视为满足 V3 历史保护。
 
-## 当前代码状态（2026-10-25 静态核对）
+## 2026-10-25 代码状态快照（历史）
 
 - `editor/visual/source/registry.ts`、`canvas/DesignCanvas.tsx`、projection/css/protocol 及基础测试已存在；支持只读点击选择、父级及源码定位，尚无悬停检查和正文写入。
 - `frontend/package.json` 已声明 parse5、DOMPurify、PostCSS/value-parser；Bootstrap 尚未声明。本轮不安装或更新依赖。
@@ -32,6 +32,29 @@
 
 具体接口、预算公式、恢复格式、结构插入矩阵及步骤 2 的退出条件统一见[实施约定](implementation-contracts.md)，后续步骤引用该约定，避免各自选择不同存储方案。
 
+## 当前运行检查与新增退出条件（2026-10-26）
+
+RuntimeProjection / RuntimeInspector 已接入同一 Sandpack iframe，模式切换只开关检查；旧静态画布冻结。步骤 1 新增投影斜线语义、候选/歧义来源、CSP、布局动画、模式竞态及代码/运行文件分离已经实施并验证。所有来源候选仍为只读；运行字段/结构差异展示及按操作判断写权限属于 2C/3。具体见[步骤 1](steps/01-source-and-safe-canvas.md)与[验收增补](acceptance.md)。
+
+2A/2B 可先推进独立历史/存储工作；未通过新增退出检查不开放 2C 可视化写入。不得把“可定位”直接用作文本/属性/结构写权限，门槛见实施约定第 0 节。
+
+## 本轮优化的开发任务与顺序
+
+下列任务直接纳入现有五步。前四项 Step 01 只读任务已完成，实测见本轮证据；写入及其余任务待实施。评审报告保留取舍依据，实际开发按本表及对应步骤执行。
+
+| 顺序 / 所属步骤 | 具体开发任务 | 主要改动位置 | 交付与验证 |
+| --- | --- | --- | --- |
+| 先做 / 步骤 1 | 修正临时标记插入，不改变无引号属性末尾斜线等解析语义 | runtimeProjection.ts、runtimeProjection.test.ts | 投影前后标签/属性语义一致，原 Y.Text 和导出逐字不变；A2/A9 |
+| 先做 / 步骤 1 | 明确来源关联与歧义状态；覆盖初始化前克隆、替换、重建及重复标记 | registry.ts、runtimeProjection.ts、RuntimeInspector.tsx 及对应测试 | 动态/歧义节点只读，不自动提升祖先；A2/A9 |
+| 随后 / 步骤 1 | 尊重 HTTP/meta CSP；模式开关加入 revision，失效清理不刷新 iframe | runtimeProjection.ts、RuntimeInspector.tsx、SandpackBridge 及测试 | CSP 不绕过、旧消息不恢复检查，输入/滚动/脚本状态保留；A3/A9/A10 |
+| 随后 / 步骤 1 | 检查激活且有目标时采样目标几何并去重，停止后取消；按实测减少消息处理重复读源码 | runtimeProjection.ts、RuntimeInspector.tsx 及测试 | 动画/延迟资源后框正确，静止不重复上报，失效校验不削弱；A10 |
+| 写入前 / 步骤 2C | 命令绑定实际检查 fileId、代次、mode revision 和按操作判断的能力；落盘后复核，切模式取消未提交动作 | 统一设计命令、ProjectWorkspace、session 与恢复模块 | 代码 B/运行 A 不误写；字段/结构偏离拒绝；prepared 后取消保留材料；A1/A3/A7 |
+| 按既有顺序 / 步骤 2A–2D | 历史候选 → 同库预算/恢复 → Bootstrap/按钮 → 双会话/离线闭环 | collaboration 与 visual/source/templates | 原历史、容量和恢复门槛保持；上述只读任务与 2A/2B 可独立推进，全部前置通过才开放 2C |
+| 扩展时 / 步骤 3 | 每个属性及 inside/before/after/delete 分别检查能力；DOM 父级检查与源码父级写入分开 | PropertiesPanel、source 补丁与结构校验、投放协议 | 不把可定位等同于可编辑，不用运行 DOM 重排替代源码关系；A1–A4 |
+| 收口 / 步骤 4–5 | 共享定位类型移出旧 DesignCanvas；扩展写入/持久化验收脚本，输出留 ignored 目录 | visual/source 或 types、scripts 或 collaboration/scripts | Step 01 只读脚本已新增 `scripts/verify-runtime-step01.mjs`；完整写入脚本及类型迁移待实施 |
+
+开发入口：[步骤 1 的增量任务清单](steps/01-source-and-safe-canvas.md) → [步骤 2 的统一命令与提交复核](steps/02-button-history-and-recovery.md) → [步骤 3 的属性与投放](steps/03-templates-properties-and-insertion.md)。新增用例归入原 A1–A10，不另设交付标准。
+
 ## 固定约束和预算
 
 - Y.Text 是唯一源码权威；新增解析、nodeId、选择、能力令牌和恢复状态只存本地，不加入 Y.Doc schema。
@@ -39,20 +62,20 @@
 - 只支持单个已有 HTML 的正文补丁。Bootstrap 准备可同时增加 CSS/许可/目录和 HTML link，但独立提交、不进入正文历史。
 - 协议预算来自 [document-rules.ts](../../collaboration/src/document-rules.ts)：100 文件（含现有校验计入的逻辑删除项）、100 显式目录、1 MiB/文件、10 MiB 正文、12 MiB Y.Doc、2 MiB Update。不能只数可见文件或字符串长度。
 - 现有离线待确认预算为 1536 KiB，`CACHE_LIMIT = 12 MiB + 1536 KiB`。同 user/project/epoch 的日志、设计材料和预留共享此预算；材料另受 5 MiB 上限约束。固定使用现有 custom store，同事务完成计量与预留，具体见实施约定；不自动清未解决记录，不扩大浏览器缓存预算或协议预算。
-- 设计 HTML 上限 200 KiB，以 UTF-8 字节计量；位置/补丁偏移使用 UTF-16。CSS 投影总量、重复引用、通信大小/超时另设明确可测试的常量，记录实测后选定值，不修改协议预算。
+- 设计 HTML 上限 200 KiB，以 UTF-8 字节计量；位置/补丁偏移使用 UTF-16。运行 CSS/外部资源保持原页行为；检查通信大小/超时及几何采样另设明确可测试的常量，记录实测后选定值，不修改协议预算。
 - 应用运行和验收使用根 `.env` 以及本机 MySQL、MinIO、Redis；不使用 Docker / Docker Compose，不输出或提交凭据。
 
 ## 实施顺序
 
 | 步骤 | 实现内容 | 完成条件 |
 | --- | --- | --- |
-| 1 源码与安全画布 | 工作区切换；位置解析、临时节点映射、只读限制；独立静态 iframe；项目直接 CSS；悬停检查与源码装饰高亮、点击锁定及父级定位；过期消息/命令拒绝。 | 普通页面正确显示；悬停不抢焦点、不展开已收起源码区，不覆盖锁定目标；源码变化使旧状态失效，用户脚本/导航不执行，原文不被投影改写；增量自动检查及真实浏览器验证通过。 |
+| 1 源码与运行检查 | 同 iframe 开关；本代来源关联、只读限制；悬停/锁定与源码装饰；父级及文件身份；投影保真、CSP/布局/生命周期加固。 | 模式切换保留输入/滚动/脚本状态；不抢焦点、不误写动态节点；新增退出检查和真实浏览器验证通过，既有记录不替代新边界。 |
 | 2 按钮闭环与保护 | Bootstrap 独立准备；单 HTML 补丁；按钮插入/删除；共享正文历史；本机恢复落盘和文件级远端检查。 | 一次插入可撤销，资源不被撤销；取消/超限/准备失败零写入；两个会话与离线迟到更新触发检查；刷新能看到材料。 |
 | 3 七类模板与属性 | 补全七模板，文本/属性编码、基础内联样式、简单 Flex；普通容器投放和前后插入，父元素选择；按钮/键盘入口。 | 每个模板正常插入；样式只改实例；混合文本/特殊结构明确限制；不误删相邻内容。 |
 | 4 集成与边界 | 多 HTML、资源复用、重命名/删除提示、可写与预算统一门禁、重连/撤权/epoch、iframe 生命周期、性能与窄窗口。 | 所有写入口使用同一校验；恢复超限/失败停止设计写入；旧桥接不可写；代码、运行、已有文件操作不回归。 |
 | 5 本机验收与交付 | 执行十项验收，真实双会话、MySQL/MinIO 持久化重开、导出/复制、Chrome/Edge；补充实际运行说明。 | 全部检查有真实结果，失败项修复；功能状态与文档一致，无凭据或工具信息进入 ZIP。 |
 
-每步详细任务如下，按序执行；步骤 1 及悬停检查增量已完成，其余步骤待实施：
+每步详细任务如下；步骤 1 只读链路及新增退出检查已有证据，步骤 2–5 待实施：
 
 | 顺序 | 详细步骤 | 前置产物 | 本步交付 |
 | --- | --- | --- | --- |
@@ -66,7 +89,7 @@
 
 步骤 2 内部按 2A 历史候选 → 2B 恢复存储与原子预算 → 2C Bootstrap/按钮 → 2D 双会话与离线闭环串行推进。2A/2B 先用测试夹具验证，不开放未受保护的写入 UI；2D 通过才进入步骤 3。各节点退出条件见实施约定，不将五个步骤视为等工作量任务。
 
-步骤 1 不开放正文写入，先按详细步骤 1.4/1.5 补齐设计模式的悬停检查：临时 hover 与锁定 selection 分离，源码装饰不调用 focus/setSelection，消息按动画帧合并，清理覆盖排队回调与源码装饰。运行模式不增加动态 DOM 检查。步骤 2 完成前不扩展七类模板或拖拽 UI；尤其先证明共享历史不捕获 Bootstrap、远端检查不消耗历史栈、刷新可找回被删除内容，再进入步骤 3。步骤 4 是全入口收口，不是首次实现离线/恢复/安全；这些保护必须随第一个写用例交付。
+步骤 1 不开放正文写入，按详细步骤 1.1–1.5 完成本轮运行检查增量；已有悬停/锁定链路继续复用。动态 DOM 可在设计模式只读检查，运行模式关闭检查；来源关联、写能力和当前运行文件分别判断。步骤 2 完成前不扩展七类模板或拖拽 UI；尤其先证明共享历史不捕获 Bootstrap、远端检查不消耗历史栈、刷新可找回被删除内容，再进入步骤 3。步骤 4 是全入口收口，不是首次实现离线/恢复/安全；这些保护必须随第一个写用例交付。
 
 ## 建议代码组织
 
@@ -79,7 +102,7 @@ frontend/src/editor/visual/
   PropertiesPanel.tsx
   RecoveryPanel.tsx
   source/                        # 位置解析、注册表、编码、局部补丁
-  canvas/                        # 清洗投影、CSS 资源、桥接、选择和拖拽
+  canvas/                        # 运行页临时投影、桥接、选择、几何和拖拽；旧静态实现冻结
   templates/                     # 七类模板、Bootstrap 内置资源和准备计划
 frontend/src/collaboration/
   visualRecovery.ts              # 使用现有 custom store；可逆材料、联合预算和清理
@@ -113,6 +136,7 @@ frontend/src/collaboration/
 当前已存在、可用于增量回归的测试入口如下，命令工作目录均为 `frontend`；新增 visual 测试在实际建立文件后加入对应组：
 
 | 检查重点 | 现有增量命令 |
+| 运行检查/映射/投影 | `npm test -- src/editor/visual src/editor/v2/SandpackBridge.test.tsx` |
 | --- | --- |
 | 工作区/面板/运行桥接 | `npm test -- src/editor/v2/WorkspacePanels.test.tsx src/editor/v2/SandpackBridge.test.tsx src/editor/v2/WorkspaceFileExplorer.test.tsx` |
 | 文档/历史/离线会话 | `npm test -- src/collaboration/document.test.ts src/collaboration/session.test.ts src/collaboration/session.offline.test.ts src/collaboration/offline.test.ts` |

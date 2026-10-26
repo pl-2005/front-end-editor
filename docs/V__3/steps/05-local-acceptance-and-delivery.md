@@ -50,7 +50,7 @@ if ($LASTEXITCODE -ne 0) { throw 'V2 本机回归失败' }
 Pop-Location
 ```
 
-它验证既有交付流程，不能替代 V3 A1–A10。当前没有 V3 专用验收命令；开发时可参考现有脚本新增 `collaboration/scripts/verify-v3-local.mjs`，实现并实际验证后再在本页登记命令、参数、端口和证据目录，不能预称该脚本已存在。
+它验证既有交付流程，不能替代 V3 A1–A10。Step 01 已新增可检出的只读浏览器命令 `node scripts/verify-runtime-step01.mjs`（仓库根执行，默认本机 Vite 5173、web-access proxy 3456），结果输出 ignored `.codex-build/runtime-step01-results.json`，实际范围见[加固证据](../evidence/step01-runtime-hardening.md)。旧 `.codex-build/verify-runtime-inspector.mjs` 保留为历史记录。当前仍没有 V3 完整写入验收命令；开发时可参考现有脚本新增 `collaboration/scripts/verify-v3-local.mjs`，实现并实际验证后再登记命令、参数、端口和证据目录，不能预称该脚本已存在。
 
 ## 5.3 按十项验收逐组执行
 
@@ -58,7 +58,7 @@ Pop-Location
 
 | 顺序 | 验收项 | 操作与源码/存储证据 |
 | --- | --- | --- |
-| 1 | A9 安全和资源 | 在真实浏览器运行恶意 HTML/CSS 和错误桥接消息；记录无脚本/导航/表单执行，原文逐字未变，直接 CSS 与限制提示正确 |
+| 1 | A9 安全和资源 | 在真实浏览器保留原用户脚本/CSS，验证检查点击/按压/提交被拦截、切回恢复交互、原 sandbox/父页导航限制不变；HTTP/meta CSP 不可用只禁检查。错误桥接拒绝、动态及歧义节点不获写权限，正文与导出无工具材料 |
 | 2 | A1 基本闭环 | 七模板拖拽及按钮插入，内部/前后关系和父级定位；保存两会话同一 HTML 的结果及实际插入顺序 |
 | 3 | A2 源码保真 | 用特殊字符/异常结构样例；对未修改区间做逐字断言，不只比 DOM 或截图；手写修复后恢复设计 |
 | 4 | A3 取消和过期 | Esc/画布外/失焦/切换/删目标/撤权/旧消息/重复请求；记录拒绝原因、正文 diff 为零和未新增历史 |

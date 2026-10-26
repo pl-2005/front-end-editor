@@ -57,7 +57,8 @@
   box-sizing: border-box;
   pointer-events: none;
 }
-.v3-hover span {
+.v3-hover span,
+.v3-runtime-hover-label {
   position: absolute;
   top: 0;
   left: 0;
@@ -66,6 +67,18 @@
   background: #78350f;
   color: white;
   font-size: 11px;
+}
+.v3-runtime-hover-label {
+  position: fixed;
+  visibility: hidden;
+  max-width: min(360px, 100vw);
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 18px;
+  pointer-events: none;
+  z-index: 1100;
 }
 .v3-source-hover {
   background: #fbbf2440;
